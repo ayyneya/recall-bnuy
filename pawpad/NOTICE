@@ -1,0 +1,17 @@
+Pawpad
+Copyright 2026 the Pawpad contributors
+
+Pawpad is a modified version of Recall, which plays Overwatch on Apple Silicon Macs.
+It runs Aniimo instead: its own setup worker (pawpad/Worker), app (pawpad/App) and build
+script (scripts/build_pawpad.py), Wine patch patches/wine-rsaenh-hmac.patch, and small
+changes to Recall's shared worker code (scripts/portable_network.h).
+
+Recall's notice, which applies to the code Pawpad takes from it:
+
+Recall
+Copyright 2026 Joshua Asher Nelson
+
+Originally created by Joshua Asher Nelson.
+Original project: https://github.com/AsherJN/recall
+
+The Recall name, icon and artwork are not part of Pawpad; Pawpad has its own.

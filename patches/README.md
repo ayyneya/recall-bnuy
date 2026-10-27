@@ -149,6 +149,19 @@ patches above:
 
 Menus, Battle.net and every other program keep the standard behavior.
 
+`wine-rsaenh-hmac.patch` (Pawpad) applies after `wine-winemac-activation.patch`.
+Aniimo's sign-in computes an HMAC-SHA256 through the legacy CryptoAPI
+(`CryptSetHashParam(HP_HMAC_INFO)` with `CALG_SHA_256` on a `PROV_RSA_FULL`
+provider). Wine 11.0's `rsaenh` refused SHA-256 as the inner hash because that
+provider doesn't list it, reported success anyway and left the hash empty, so the
+next `CryptHashData` crashed the game about 20 seconds after it opened
+([Wine bug 60345](https://bugs.winehq.org/show_bug.cgi?id=60345), seen on
+CrossOver 26.2 and 26.3). Windows accepts any hash it implements there. This is
+upstream commit `4352d975bea6bd4d453b7d4e8875cc4b2335cfc4` (Wine 11.19), ported
+from SymCrypt to the TomCrypt `rsaenh` that CrossOver 26.3 still has: the inner
+hash comes from `init_hash_impl` whether or not the provider lists it, its size
+from TomCrypt's descriptor, and an unknown hash fails with `NTE_BAD_ALGID`.
+
 Apply each patch once, in this order, first using `git apply --check`.
 Do not combine them with historical candidate patch variants.
 See [build status](../docs/BUILDING.md) and

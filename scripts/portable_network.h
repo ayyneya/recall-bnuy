@@ -5,9 +5,10 @@
 
 // The values of one key in user.reg, each as written there ("hex:..." for binary data,
 // continuation lines joined). Nil when the file can't be read; a missing key has none.
-// Key names compare without regard to case, as Windows compares them.
-static NSDictionary *userRegistryValues(NSString *key) {
-    NSString *path=join(root,@"environment/user.reg");struct stat st;
+// Key names compare without regard to case, as Windows compares them. FILE is user.reg
+// (HKCU) or system.reg (HKLM, which Pawpad reads).
+static NSDictionary *registryFileValues(NSString *file, NSString *key) {
+    NSString *path=join(join(root,@"environment"),file);struct stat st;
     if(lstat(path.fileSystemRepresentation,&st) || !S_ISREG(st.st_mode) || st.st_size>(8<<20))return nil;
     NSString *text=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
     if(!text)return nil;
@@ -37,6 +38,7 @@ static NSDictionary *userRegistryValues(NSString *key) {
     }
     return values;
 }
+static NSDictionary *userRegistryValues(NSString *key) {return registryFileValues(@"user.reg",key);}
 // REG_BINARY data as user.reg writes it ("hex:46,00,..."); nil for anything else.
 static NSData *registryBinary(NSString *value) {
     if(![value hasPrefix:@"hex:"])return nil;
@@ -121,18 +123,22 @@ static BOOL configureProxy(NSString *engine, BOOL detect) {
  * only to Command. LeftOptionIsAlt, read for Overwatch.exe alone (the driver's AppDefaults),
  * makes the left Option key Alt as well. Command stays Alt; the right Option key still types
  * accented letters and symbols in the game, and Battle.net keeps both for email and password
- * (an "@" is Option+L on some keyboards). Wine reads it when Overwatch starts. */
-static NSString *const gameKeyboardKey=@"Software\\Wine\\AppDefaults\\Overwatch.exe\\Mac Driver";
+ * (an "@" is Option+L on some keyboards). Wine reads it when Overwatch starts.
+ * Pawpad's worker defines GAME_EXECUTABLE as the Aniimo client it found. */
+#ifndef GAME_EXECUTABLE
+#define GAME_EXECUTABLE @"Overwatch.exe"
+#endif
+static NSString *gameKeyboardKey(void) {return [NSString stringWithFormat:@"Software\\Wine\\AppDefaults\\%@\\Mac Driver",GAME_EXECUTABLE];}
 /* Without ENGINE it only reports whether the value is missing. The registry tool runs only
  * then. Never fails: setup and launches go on, and the next launch tries again. Reports
  * keyboard. */
 static BOOL configureOptionKey(NSString *engine) {
-    NSDictionary *values=userRegistryValues(gameKeyboardKey);
+    NSDictionary *values=userRegistryValues(gameKeyboardKey());
     BOOL set=[values[@"LeftOptionIsAlt"] isEqual:@"\"Y\""],ok=YES;
     NSMutableDictionary *details=[@{@"left_option_is_alt":@YES,@"changed":@NO} mutableCopy];
     if(!values)details[@"registry"]=@"unreadable";
     if(engine && !set) {
-        ok=registryTool(engine,@[@"add",[@"HKCU\\" stringByAppendingString:gameKeyboardKey],@"/v",@"LeftOptionIsAlt",@"/t",@"REG_SZ",@"/d",@"Y",@"/f"],@"keyboard.log");
+        ok=registryTool(engine,@[@"add",[@"HKCU\\" stringByAppendingString:gameKeyboardKey()],@"/v",@"LeftOptionIsAlt",@"/t",@"REG_SZ",@"/d",@"Y",@"/f"],@"keyboard.log");
         details[@"changed"]=@(ok);
         if(!ok)details[@"failed"]=@YES;
     }

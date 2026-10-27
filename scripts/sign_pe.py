@@ -161,9 +161,9 @@ def create_certificate(folder):
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         (tmp / 'root.cnf').write_text('[req]\ndistinguished_name=dn\nprompt=no\nx509_extensions=v3\n'
-                                      '[dn]\nCN=Recall Root\n[v3]\nbasicConstraints=critical,CA:TRUE\n'
+                                      '[dn]\nCN=Pawpad Root\n[v3]\nbasicConstraints=critical,CA:TRUE\n'
                                       'keyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n')
-        (tmp / 'request.cnf').write_text('[req]\ndistinguished_name=dn\nprompt=no\n[dn]\nCN=Recall\n')
+        (tmp / 'request.cnf').write_text('[req]\ndistinguished_name=dn\nprompt=no\n[dn]\nCN=Pawpad\n')
         (tmp / 'leaf.cnf').write_text('basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\n'
                                       'extendedKeyUsage=codeSigning\nsubjectKeyIdentifier=hash\n'
                                       'authorityKeyIdentifier=keyid\n')
@@ -179,7 +179,7 @@ def create_certificate(folder):
         run('x509', '-in', tmp / 'leaf.pem', '-outform', 'der', '-out', folder / LEAF)
     for name in (KEY, ROOT_KEY):
         (folder / name).chmod(0o600)
-    print(f'Created the "Recall" code-signing certificate in {folder}; '
+    print(f'Created the "Pawpad" code-signing certificate in {folder}; '
           f'SHA-256 {hashlib.sha256((folder / LEAF).read_bytes()).hexdigest()}')
 
 

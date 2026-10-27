@@ -1,0 +1,76 @@
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index b39df41..5a1f578 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1828,6 +1828,8 @@ public:
+     if (!PreDispatch())
+       return;
+     EmitOP([ThreadGroupCountX, ThreadGroupCountY, ThreadGroupCountZ](ArgumentEncodingContext &enc) {
++      if (enc.compute_pso_missing)
++        return;
+       enc.resolveComputePassBarrier();
+       auto &cmd = enc.encodeComputeCommand<wmtcmd_compute_dispatch>();
+       cmd.type = WMTComputeCommandDispatch;
+@@ -1844,6 +1846,8 @@ public:
+       return;
+     if (auto bindable = GetResourceCommon(pBufferForArgs)) {
+       EmitOP([AlignedByteOffsetForArgs, ArgBuffer = bindable->buffer()](ArgumentEncodingContext &enc) {
++        if (enc.compute_pso_missing)
++          return;
+         auto [buffer, buffer_offset] = enc.access(ArgBuffer, AlignedByteOffsetForArgs, 12, ResourceAccess::Read);
+         enc.resolveComputePassBarrier();
+         auto &cmd = enc.encodeComputeCommand<wmtcmd_compute_dispatch_indirect>();
+@@ -5031,6 +5035,7 @@ public:
+                ArgumentEncodingContext &enc) {
+       MTL_COMPILED_COMPUTE_PIPELINE ComputePipeline;
+       pso->GetPipeline(&ComputePipeline); // may block
++      enc.compute_pso_missing = !ComputePipeline.PipelineState;
+       if (!ComputePipeline.PipelineState)
+         return;
+       auto &cmd = enc.encodeComputeCommand<wmtcmd_compute_setpso>();
+diff --git a/src/d3d11/d3d11_pipeline.cpp b/src/d3d11/d3d11_pipeline.cpp
+index 35bf49e..8403d4d 100644
+--- a/src/d3d11/d3d11_pipeline.cpp
++++ b/src/d3d11/d3d11_pipeline.cpp
+@@ -166,6 +166,7 @@ public:
+   MTLCompiledComputePipelineImpl(MTLD3D11Device *pDevice, ManagedShader shader)
+       : device_(pDevice) {
+     ComputeShader = shader->get_shader(ShaderVariantDefault{});
++    shader_sha1_ = shader->sha1().string();
+     uint32_t total_tgsize = shader->reflection().ThreadgroupSize[0] *
+                             shader->reflection().ThreadgroupSize[1] *
+                             shader->reflection().ThreadgroupSize[2];
+@@ -202,7 +203,8 @@ public:
+     }
+ 
+     if (!state_) {
+-      ERR("Failed to create compute PSO: ", err.description().getUTF8String());
++      ERR("Failed to create compute PSO for shader ", shader_sha1_, ": ", err.description().getUTF8String(),
++          "; its dispatches are skipped");
+       return this;
+     }
+ 
+@@ -226,6 +228,7 @@ private:
+   CompiledShader *ComputeShader;
+   WMT::Reference<WMT::ComputePipelineState> state_;
+   bool tgsize_is_multiple_of_sgwidth;
++  std::string shader_sha1_;
+   const uint64_t trace_id_ = nextPipelineTraceId();
+ };
+ 
+diff --git a/src/dxmt/dxmt_context.hpp b/src/dxmt/dxmt_context.hpp
+index 2ecbf7f..d126b57 100644
+--- a/src/dxmt/dxmt_context.hpp
++++ b/src/dxmt/dxmt_context.hpp
+@@ -834,6 +834,11 @@ public:
+   uint32_t tess_num_output_control_point_element;
+   uint32_t tess_threads_per_patch;
+ 
++  // The compute pipeline bound last could not be built (Metal refused it): its dispatches are
++  // skipped, as Direct3D drivers do, instead of reaching the GPU without a pipeline, which
++  // crashed Apple's driver with a division by zero (Aniimo, M2 Pro).
++  bool compute_pso_missing = false;
++
+   // DXMT_BENCH_LABELS=1: every encoder is labeled with its frame, its index in that
+   // frame, its attachments and its command count, for GPU traces of the replayer.
+   bool bench_labels = false;
