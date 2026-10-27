@@ -1,0 +1,8 @@
+{
+  "appVersion": "0.1.0",
+  "runtimeVersion": "phase2-20261019.1",
+  "runtimeArchive": "runtime.tar.gz",
+  "runtimeSHA256": "b2f3223e5e8d6021da67adc89d4f9227801944497dc15ec14cd58751b8b34c8e",
+  "installerURL": "https://worldx-global-pc-cdn.kingsgroupgames.com/official-website/pc-launcher/aniimo-global.exe",
+  "installerSHA256": "7f54a575531f805936278c1dce418647b7d251548704f77f31795c5868b79678"
+}

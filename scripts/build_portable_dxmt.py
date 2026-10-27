@@ -69,7 +69,14 @@ def prepare_source(work):
     check=subprocess.run(['git','apply','--check',str(shader_pack)],cwd=source,capture_output=True)
     if check.returncode==0:run('git','apply',shader_pack,cwd=source)
     else:run('git','apply','--reverse','--check',shader_pack,cwd=source)
-    return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack}
+    # Pawpad: a compute pipeline Metal refuses to build has its dispatches skipped. Encoding them
+    # without a pipeline divided by zero in Apple's GPU driver and froze Aniimo at 100% loading.
+    skip_failed=ROOT/'patches/dxmt-skip-failed-compute.patch'
+    if hashlib.sha256(skip_failed.read_bytes()).hexdigest()!='9da53f1e033ba1b503e161cb450da47458c7b5ccc231a989335e9d1427e9cde5':raise ValueError('Accepted failed-pipeline patch changed')
+    check=subprocess.run(['git','apply','--check',str(skip_failed)],cwd=source,capture_output=True)
+    if check.returncode==0:run('git','apply',skip_failed,cwd=source)
+    else:run('git','apply','--reverse','--check',skip_failed,cwd=source)
+    return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed}
 
 
 def build(work,tools,jobs,signing=SIGNING):
@@ -100,6 +107,7 @@ def build(work,tools,jobs,signing=SIGNING):
         'performance_patch_sha256':hashlib.sha256(performance.read_bytes()).hexdigest(),
         'metalfx_patch_sha256':hashlib.sha256(metalfx.read_bytes()).hexdigest(),'nvapi':NVAPI,
         'shader_pack_patch_sha256':hashlib.sha256(shader_pack.read_bytes()).hexdigest(),
+        'skip_failed_compute_patch_sha256':hashlib.sha256(patches['skip_failed'].read_bytes()).hexdigest(),
         'nvngx_certificate_sha256':hashlib.sha256((signing/sign_pe.LEAF).read_bytes()).hexdigest(),
         'portable_metal_patch_sha256':hashlib.sha256(portable_patch.read_bytes()).hexdigest(),
         'portable_metal_wrapper_sha256':hashlib.sha256(wrapper.read_bytes()).hexdigest(),

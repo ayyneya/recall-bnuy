@@ -1,0 +1,28 @@
+diff --git a/dlls/ntoskrnl.exe/instr.c b/dlls/ntoskrnl.exe/instr.c
+--- a/dlls/ntoskrnl.exe/instr.c
++++ b/dlls/ntoskrnl.exe/instr.c
+@@ -462,8 +462,11 @@
+     EXCEPTION_RECORD *record = ptrs->ExceptionRecord;
+     CONTEXT *context = ptrs->ContextRecord;
+ 
++    /* Under Rosetta 2 a privileged instruction raises an illegal-instruction fault, not a
++     * privileged-instruction one; emulate_instruction() still only handles the ones it knows. */
+     if ((record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
+-         record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION))
++         record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION ||
++         record->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION))
+     {
+         if (emulate_instruction( record, context ) == ExceptionContinueExecution)
+             return EXCEPTION_CONTINUE_EXECUTION;
+@@ -923,7 +926,11 @@
+     EXCEPTION_RECORD *record = ptrs->ExceptionRecord;
+     CONTEXT *context = ptrs->ContextRecord;
+ 
++    /* Under Rosetta 2 a privileged instruction such as mov rax, cr4 raises an illegal-instruction
++     * fault, not a privileged-instruction one (NetEase's NEPKernel.sys, Aniimo); emulate_instruction()
++     * still only handles the ones it knows. */
+     if (record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION ||
++        record->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION ||
+         (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+          record->ExceptionInformation[0] == EXCEPTION_READ_FAULT))
+     {

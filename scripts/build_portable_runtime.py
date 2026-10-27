@@ -77,16 +77,27 @@ V1_PATCHES = {
     'wine-win32u-display-log.patch': '2387fa06d76891b7b5981473bb06b3b939e2c7569f79b6e3a7cbf12c21297568',
     'wine-winemac-activation.patch': 'dc1b8bc4ffe3db1ec36cdebca0c73545c6e3a65428c030a45a3f39929af555f8',
 }
+# Pawpad's game fixes, after the v1.0 patches.
+PAWPAD_PATCHES = {
+    'wine-rsaenh-hmac.patch': '20e8d56f4f056533de25d619df5ff9217fafb60a87d1dd3a6657328e6ffddf55',
+    # NEPKernel.sys reads CR4; under Rosetta that faults as an illegal instruction, which
+    # ntoskrnl's emulator ignored, so winedevice crashed and the game waited for it forever.
+    'wine-ntoskrnl-rosetta-privileged.patch': 'd887e78f23d60ee36d5b2e2ca1591bd1c4332cb6ec4255c1939f4b763bb30323',
+}
 
 
 def apply_once(source, patch):
+    # The extracted source is no repository. Inside one (a workspace under a home folder kept
+    # in git), git apply skips every path outside the current folder and still succeeds, so
+    # stop git from looking above the source.
+    env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(Path(source).resolve().parent))
     result = subprocess.run(['git', 'apply', '--check', str(patch)], cwd=source,
-                            capture_output=True)
+                            capture_output=True, env=env)
     if result.returncode == 0:
-        run(['git', 'apply', patch], cwd=source)
+        run(['git', 'apply', patch], cwd=source, env=env)
     else:
         reverse = subprocess.run(['git', 'apply', '--reverse', '--check', str(patch)],
-                                 cwd=source, capture_output=True)
+                                 cwd=source, capture_output=True, env=env)
         if reverse.returncode == 0:
             return
         # Some pinned Soju patches have overlapping hunk context rejected by
@@ -131,6 +142,13 @@ def build(work, tools, headers, jobs):
         p = ROOT / 'patches' / name
         if sha(p) != expected:
             raise RuntimeError('The accepted v1.0 patch changed: ' + name)
+        apply_once(wine, p)
+    # Aniimo signs in with HMAC-SHA256 through the legacy CryptoAPI (Wine bug 60345), and its
+    # anti-cheat driver reads a control register, which Rosetta reports differently.
+    for name, expected in PAWPAD_PATCHES.items():
+        p = ROOT / 'patches' / name
+        if sha(p) != expected:
+            raise RuntimeError('The accepted Pawpad patch changed: ' + name)
         apply_once(wine, p)
     # The complete native driver supersedes Soju's native-window patches.
     # Omit its GOG-only Chromium injection (not used by the v6 launcher), which
@@ -239,6 +257,7 @@ def build(work, tools, headers, jobs):
               'soju_compatibility_patches': PATCHES,
               'directory_boolean_patch_sha256': sha(directory_patch),
               'v1_patches': V1_PATCHES,
+              'pawpad_patches': PAWPAD_PATCHES,
               'gnutls_header_sha256': sha(headers / 'gnutls/gnutls.h'),
               'minimum_macos': '26.0', 'runtime_scope': 'Wine + FreeType built from source; DXMT assembly is separate',
               'without_vulkan': False, 'without_gstreamer': True, 'with_sdl2': True,

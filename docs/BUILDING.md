@@ -29,8 +29,8 @@ Extract the Wine source and apply, once each and in this order,
 `patches/wine-v1-canvas.patch`, `patches/wine-mouselook.patch`,
 `patches/wine-portable-directory-boolean.patch`, Soju's
 `ncrypt-persisted-keys.patch`, `patches/wine-server-registry-save.patch`,
-`patches/wine-ntdll-syscall-log.patch`, `patches/wine-win32u-display-log.patch`
-and `patches/wine-winemac-activation.patch`. `build_portable_dxmt.py` and
+`patches/wine-ntdll-syscall-log.patch`, `patches/wine-win32u-display-log.patch`,
+`patches/wine-winemac-activation.patch` and Pawpad's `patches/wine-rsaenh-hmac.patch`. `build_portable_dxmt.py` and
 `build_portable_runtime.py` apply them for you and check each one's SHA-256.
 The two `v1` filenames identify the complete integration patches; do not layer
 older candidate patches on them.
