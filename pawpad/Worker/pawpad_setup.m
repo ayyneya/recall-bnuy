@@ -181,6 +181,9 @@ static NSTask *taskIn(NSString *executable, NSArray *args, NSDictionary *env, NS
     NSFileHandle *out=[NSFileHandle fileHandleForWritingAtPath:log];[out truncateFileAtOffset:0];
     p.standardOutput=out;p.standardError=out;
     if(![p launchAndReturnError:nil]) fail(@"process_launch_failed");
+    // The child has its own copy; this one would stay open for the worker's life (the recorder
+    // runs ps every 2 s: one descriptor each, until the 256-descriptor limit stopped it).
+    [out closeFile];
     return p;
 }
 static NSTask *task(NSString *executable, NSArray *args, NSDictionary *env, NSString *logname) {

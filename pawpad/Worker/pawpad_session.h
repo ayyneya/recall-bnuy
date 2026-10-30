@@ -12,10 +12,9 @@ static NSString *capture(NSString *exe, NSArray *args) {
 }
 // What a process is, from the Windows path Wine gives it as its name: "game", "client",
 // "installer" (Aniimo's launcher installer) or nil.
-static NSString *processKind(NSString *name) {
+static NSString *processKind(NSString *name, NSString *game, NSString *launcher) {
     NSString *lower=name.lowercaseString;
     if([lower hasSuffix:[@"\\" stringByAppendingString:aniimoInstaller]])return @"installer";
-    NSString *game=keptProgram(@"game_path"),*launcher=keptProgram(@"launcher_path");
     if([lower hasSuffix:[@"\\" stringByAppendingString:(game ? game.lastPathComponent : provisionalGameExecutable).lowercaseString]])return @"game";
     NSString *folder=launcher ? windowsPath(launcher.stringByDeletingLastPathComponent) : nil;
     if(folder && [lower hasPrefix:[folder.lowercaseString stringByAppendingString:@"\\"]] && [lower hasSuffix:@".exe"])return @"client";
@@ -27,13 +26,16 @@ static NSArray *sessionProcesses(void) {
     if(membershipCache.count>256)[membershipCache removeAllObjects];
     NSString *engine=[[runtime() stringByResolvingSymlinksInPath] stringByAppendingString:@"/"];
     NSString *shells=[[join(root,@"app-shell") stringByResolvingSymlinksInPath] stringByAppendingString:@"/"];
+    // The game's and launcher's paths, read once per call (state.json used to be read twice for
+    // every line ps printed).
+    NSString *game=keptProgram(@"game_path"),*launcher=keptProgram(@"launcher_path");
     NSString *table=capture(@"/bin/ps",@[@"-axo",@"pid=,lstart=,comm="]);
     if(!table)fail(@"session_check_failed");
     NSRegularExpression *rx=[NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d+)\\s+(\\S+\\s+\\S+\\s+\\d+\\s+\\S+\\s+\\d+)\\s+(.+)$" options:0 error:nil];
     NSMutableArray *found=[NSMutableArray array];
     for(NSString *line in [table componentsSeparatedByString:@"\n"]) {
         NSTextCheckingResult *m=[rx firstMatchInString:line options:0 range:NSMakeRange(0,line.length)];if(!m)continue;
-        NSString *kind=processKind([[line substringWithRange:[m rangeAtIndex:3]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]);
+        NSString *kind=processKind([[line substringWithRange:[m rangeAtIndex:3]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet],game,launcher);
         if(!kind)continue;
         NSString *pid=[line substringWithRange:[m rangeAtIndex:1]],*start=[line substringWithRange:[m rangeAtIndex:2]];
         NSString *identity=[NSString stringWithFormat:@"%@|%@",pid,start];

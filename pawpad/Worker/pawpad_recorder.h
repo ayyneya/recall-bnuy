@@ -14,7 +14,6 @@
  *   timeline.jsonl    one line per notable event, from every source, on one clock (unix ms):
  *                     launcher/game start and end, first frame, freezes, crashes, GPU pipeline
  *                     failures, Wine errors, heat and memory-pressure changes, markers
- *   freezes/          a stack sample of the game (Apple's sample tool) for each freeze
  *   report.md/.json   pawpad-perf's summary, written when the session ends
  *
  * The engine's logs are written off the game's threads (ring buffers, writer threads); this
@@ -325,7 +324,7 @@ static NSString *const systemHeader=@"unix_ms,game_pid,window_on_screen,frames_s
  * closes), up to half a day, and never closes the launcher: Aniimo's may still be needed while
  * the game runs. With RECORD (Settings › Record performance) it is also the flight recorder:
  * once a second it samples the game and the Mac into system.csv, reads what the game showed
- * and what Wine printed, notes events in timeline.jsonl, samples a freeze, and writes the
+ * and what Wine printed, notes events (freezes too) in timeline.jsonl, and writes the
  * session's report when it ends. Without it, it only notes when the game ran. */
 static void watchClient(BOOL record) {
     int fd=open(join(root,@"launch-monitor.lock").fileSystemRepresentation,O_CREAT|O_RDWR|O_NOFOLLOW,0600);
@@ -348,7 +347,9 @@ static void watchClient(BOOL record) {
     NSDate *lastFrame=nil,*freezeStart=nil;NSUInteger freezes=0,samples=0,gameFrames=0,stutters=0;int thermal=-1,pressure=-1;
     NSMutableArray *recent=[NSMutableArray array];  // [presented_s, gap_ms] of the last 30 s on screen
     NSUInteger recorderErrors=0;
-    while(deadline.timeIntervalSinceNow>0 && !cancelRequested) {
+    // One autorelease pool per tick: without it every second's objects (ps output, state reads,
+    // log lines) stayed alive for the whole session (9.7 GB after an hour, 30 Oct).
+    while(deadline.timeIntervalSinceNow>0 && !cancelRequested) { @autoreleasepool {
         NSDate *tick=[NSDate date];
         // One bad second (a file mid-rotation, a process gone mid-read) never ends the recording:
         // it is noted and the next second goes on.
@@ -403,12 +404,8 @@ static void watchClient(BOOL record) {
             if(gamePid && visible && lastFrame && -lastFrame.timeIntervalSinceNow>=3 && !freezeStart) {
                 freezeStart=lastFrame;freezes++;
                 NSMutableDictionary *details=[@{@"pid":@(gamePid),@"cpu_pct":@(round(cpu)),@"runnable_pct":@(round(runnable)),@"threads":@(now.threads),@"src":@"recorder"} mutableCopy];
-                if(samples<5) {
-                    NSString *file=join(folder,[NSString stringWithFormat:@"freezes/freeze-%lu-%d.txt",(unsigned long)freezes,gamePid]);
-                    mkdirs(file.stringByDeletingLastPathComponent);
-                    @try { task(@"/usr/bin/sample",@[[NSString stringWithFormat:@"%d",gamePid],@"3",@"-mayDie",@"-file",file],nil,@"freeze-sample.log");samples++;details[@"sample"]=[file substringFromIndex:folder.length+1]; }
-                    @catch(NSException *ignored) { (void)ignored; }
-                }
+                // No stack sample: Apple's sample tool attaches to the game's process and reads its
+                // memory, which Pawpad never does to a game behind an anti-cheat.
                 timeline(@"freeze_started",details);
             }
             if(freezeStart && shown.any) {
@@ -442,7 +439,7 @@ static void watchClient(BOOL record) {
         if(-clientSeen.timeIntervalSinceNow>120)break;
         NSTimeInterval rest=(folder ? 1.0 : 2.0)+tick.timeIntervalSinceNow;
         if(rest>0)[NSThread sleepForTimeInterval:rest];
-    }
+    }}
     // Stopped by a new launch (SIGTERM): finish this session's record and report all the same.
     BOOL stopped=cancelRequested!=0;cancelRequested=0;
     if(gamePid) {recordGameEnded(monitorSession);timeline(@"game_ended",@{@"pid":@(gamePid),@"frames_shown":@(gameFrames),@"src":@"recorder"});}
