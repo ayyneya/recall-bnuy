@@ -21,10 +21,10 @@ static BOOL mainDisplayIsRetina(void) {
 static BOOL retinaModeOn(void) {
     return [userRegistryValues(@"Software\\Wine\\Mac Driver")[@"RetinaMode"] isEqual:@"\"Y\""];
 }
-/* Sets Retina mode for the main display, only while nothing of Pawpad's runs (Wine keeps the
- * screen's geometry for its whole session). Fails only if the registry can't be written. */
-static void configureRetinaMode(NSString *engine) {
-    BOOL wanted=mainDisplayIsRetina();
+/* Sets Retina mode (wanted: on for a Retina main display, above), only while nothing of Pawpad's
+ * runs (Wine keeps the screen's geometry for its whole session). Fails only if the registry can't
+ * be written. */
+static void configureRetinaMode(NSString *engine, BOOL wanted) {
     if(retinaModeOn()==wanted)return;
     if(sessionProcesses().count || busy(engine))fail(@"close_game_before_setup");
     if(!registryTool(engine,@[@"add",@"HKCU\\Software\\Wine\\Mac Driver",@"/v",@"RetinaMode",@"/t",@"REG_SZ",@"/d",wanted ? @"Y" : @"N",@"/f"],@"retina-mode.log"))

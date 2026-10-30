@@ -384,7 +384,7 @@ static void prepare(void) {
     if(waitTask(task(join(engine,@"bin/wine"),@[@"wineboot.exe",@"-u",@"-r"],wineEnv(engine),@"wineboot.log"),180))fail(@"environment_initialization_failed");
     if(waitTask(task(join(engine,@"bin/wineserver"),@[@"-w"],wineEnv(engine),@"wineboot-wait.log"),60))fail(@"environment_initialization_busy");
     if(![fm fileExistsAtPath:join(prefix,@"system.reg")])fail(@"environment_registry_missing");
-    configureRetinaMode(engine);
+    configureRetinaMode(engine,mainDisplayIsRetina());
     // Before the launcher first goes online. None stops setup; launches retry.
     configureProxy(engine,proxyDetectionChosen());
     configureOptionKey(engine);
@@ -474,7 +474,7 @@ static NSDictionary *extraEnvironment(NSString *spec) {
     }
     return extra;
 }
-static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, NSString *logging, NSString *loggingCustom, NSString *extraSpec, BOOL metalfx, NSString *sharpening, BOOL mouselook) {
+static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, NSString *logging, NSString *loggingCustom, NSString *extraSpec, BOOL metalfx, NSString *sharpening, BOOL mouselook, BOOL retina) {
     // Both checked before anything changes: a rejected --env leaves the session and settings alone.
     NSDictionary *logs=loggingEnvironment(logging,loggingCustom),*extra=extraEnvironment(extraSpec);
     requireRosetta();
@@ -495,7 +495,10 @@ static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, N
         return;
     }
     if(displaysChanged)endSession(engine);
-    configureRetinaMode(engine);
+    // --retina 0: Retina mode off for this launch on a Retina main display. Windows then sees the
+    // screen in points (1800x1169 for 3600x2338 pixels) and the game draws about as many pixels as
+    // at 1080p, so a run on the built-in 120 Hz display compares with the 240 Hz monitor's (31 Oct).
+    configureRetinaMode(engine,retina && mainDisplayIsRetina());
     // MetalFX upscaling (pawpad_metalfx.h): the DLSS stand-in in system32 or put back, sharpening.
     NSString *sharpness=nil;metalfx=configureAniimoMetalFX(engine,metalfx,sharpening,&sharpness);
     if(![aniimoSharpeningProfile(aniimoRendererProfile(gameExecutable()),gameExecutable(),sharpness) writeToFile:join(root,@"dxmt.conf") atomically:YES encoding:NSUTF8StringEncoding error:nil])fail(@"settings_write_failed");
@@ -591,7 +594,7 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
         else if([command isEqual:@"onboarded"]) { NSMutableDictionary *s=state();s[@"onboarding_complete"]=@YES;writeJSON(s,join(root,@"state.json"));event(@"onboarding_complete",nil); }
         else if([command isEqual:@"session"])event(@"session",@{@"processes":sessionProcesses()});
         else if([command isEqual:@"watch"])watchClient([options[@"record"] isEqual:@"1"]);
-        else if([command isEqual:@"repair-retina"])configureRetinaMode(runtime());
+        else if([command isEqual:@"repair-retina"])configureRetinaMode(runtime(),mainDisplayIsRetina());
         // Builds the active engine's app bundle (pawpad_shell.h) without starting anything.
         else if([command isEqual:@"app-shell"])event(@"app_shell_ready",@{@"loader":ensureShell(runtime())});
         else if([command isEqual:@"download"])event(@"download_complete",@{@"file":[download(options[@"url"],options[@"sha256"]) lastPathComponent]});
@@ -607,8 +610,8 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
         // pawpad_recorder.h, and pawpad-perf's report when it ends.
         // --metalfx 1 offers DLSS on MetalFX, with --sharpening off|low|high (pawpad_metalfx.h); off by
         // default, and a launch without it puts back what an earlier one changed.
-        // --mouselook 0 launches without mouse-look (a test; on by default).
-        else if([command isEqual:@"launch"])launchClient([options[@"metal-hud"] isEqual:@"1"],[options[@"metal-validation"] intValue],![options[@"app-shell"] isEqual:@"0"],[options[@"record"] isEqual:@"1"],options[@"logging"] ?: @"off",options[@"logging-custom"],options[@"env"],[options[@"metalfx"] isEqual:@"1"],options[@"sharpening"] ?: @"off",![options[@"mouselook"] isEqual:@"0"]);
+        // --mouselook 0 launches without mouse-look, --retina 0 without Retina mode (tests; on by default).
+        else if([command isEqual:@"launch"])launchClient([options[@"metal-hud"] isEqual:@"1"],[options[@"metal-validation"] intValue],![options[@"app-shell"] isEqual:@"0"],[options[@"record"] isEqual:@"1"],options[@"logging"] ?: @"off",options[@"logging-custom"],options[@"env"],[options[@"metalfx"] isEqual:@"1"],options[@"sharpening"] ?: @"off",![options[@"mouselook"] isEqual:@"0"],![options[@"retina"] isEqual:@"0"]);
         // A marker on the current session's timeline (--label: what is about to happen, e.g. "entering world").
         else if([command isEqual:@"mark"])markSession(options[@"label"]);
         else if([command isEqual:@"logging"])event(@"logging",@{@"setting":options[@"setting"] ?: @"off",@"environment":loggingEnvironment(options[@"setting"] ?: @"off",options[@"custom"])});
