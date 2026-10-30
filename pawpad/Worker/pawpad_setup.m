@@ -211,6 +211,7 @@ static BOOL busy(NSString *engine) {
 }
 #define GAME_EXECUTABLE gameExecutable()
 #include "pawpad_aniimo.h"
+#include "pawpad_shell.h"
 #include "portable_logs.h"
 #include "pawpad_session.h"
 #include "portable_voice.h"
@@ -456,7 +457,20 @@ static NSMutableDictionary *clientEnvironment(NSMutableDictionary *env, BOOL hud
     return env;
 }
 static void closeClient(NSString *gameRunning);
-static void launchClient(BOOL hud, int validation, BOOL recording, NSString *logging, NSString *loggingCustom) {
+/* --env "KEY=VALUE;KEY=VALUE": extra environment for one launch (a test's switches, e.g.
+ * DXMT_CONFIG or DXMT_RECORD_*), applied last and kept in the session record. Only DXMT_, MTL_ and
+ * WINE_CPU_TOPOLOGY names are taken: nothing here may reach Wine's own paths or the account. */
+static NSDictionary *extraEnvironment(NSString *spec) {
+    NSMutableDictionary *extra=[NSMutableDictionary dictionary];
+    for(NSString *pair in [spec ?: @"" componentsSeparatedByString:@";"]) {
+        NSRange eq=[pair rangeOfString:@"="];if(eq.location==NSNotFound)continue;
+        NSString *key=[[pair substringToIndex:eq.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if(!matches(key,@"^(DXMT_[A-Z0-9_]+|MTL_[A-Z0-9_]+|WINE_CPU_TOPOLOGY)$"))fail(@"launch_env_rejected");
+        extra[key]=[pair substringFromIndex:eq.location+1];
+    }
+    return extra;
+}
+static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, NSString *logging, NSString *loggingCustom, NSString *extraSpec) {
     NSDictionary *logs=loggingEnvironment(logging,loggingCustom);
     requireRosetta();
     NSString *engine=runtime(),*launcher=launcherPath();
@@ -488,19 +502,25 @@ static void launchClient(BOOL hud, int validation, BOOL recording, NSString *log
     configureVoiceMicrophone(engine,nil,YES,YES);
     if(displays) {NSMutableDictionary *s=state();s[@"session_displays"]=displays;writeJSON(s,join(root,@"state.json"));}
     NSMutableDictionary *env=clientEnvironment(wineEnv(engine),hud,validation);
+    // The launcher, and the game it starts, run inside the game's app bundle (pawpad_shell.h).
+    NSString *loader=shell ? ensureShell(engine) : join(engine,@"bin/wine");
+    env[@"WINELOADER"]=loader;
     // Recording keeps Wine's errors (timestamped, with the Windows process), which the recorder
     // reads; a logging preset chosen for a problem still wins.
     if(recording)env[@"WINEDEBUG"]=@"-all,err+all,+timestamp,+pid";
     [env addEntriesFromDictionary:logs];
     NSMutableDictionary *record=[@{@"logging":logs.count ? logging : @"off",@"winedebug":env[@"WINEDEBUG"],@"dxmt_log_level":env[@"DXMT_LOG_LEVEL"],
-        @"runtime":state()[@"active_runtime"],@"game":gameExecutable(),@"metal_hud":@(hud),@"metal_validation":@(validation),@"retina_mode":@(retinaModeOn()),
+        @"runtime":state()[@"active_runtime"],@"game":gameExecutable(),@"metal_hud":@(hud),@"metal_validation":@(validation),@"app_shell":@(shell),@"retina_mode":@(retinaModeOn()),
         @"recording":@(recording)} mutableCopy];
     if([logging isEqual:@"custom"])record[@"logging_custom"]=loggingCustom;
+    NSDictionary *extra=extraEnvironment(extraSpec);
+    if(extra.count)record[@"extra_env"]=extra;
     if(recording)record[@"machine"]=machineRecord();
     stopMonitor();
     NSString *session=startSessionLog(record);
     if(recording)[env addEntriesFromDictionary:recorderEnvironment(sessionFolder(session))];
-    NSTask *p=taskIn(join(engine,@"bin/wine"),@[windowsPath(launcher)],env,[NSString stringWithFormat:@"sessions/%@/wine.log",session],launcher.stringByDeletingLastPathComponent);
+    [env addEntriesFromDictionary:extraEnvironment(extraSpec)];
+    NSTask *p=taskIn(loader,@[windowsPath(launcher)],env,[NSString stringWithFormat:@"sessions/%@/wine.log",session],launcher.stringByDeletingLastPathComponent);
     saveStage(@"launcher_started");event(@"launcher_open",@{@"pid":@(p.processIdentifier),@"session":session,@"recording":@(recording)});
     task(NSProcessInfo.processInfo.arguments[0],@[@"watch",@"--root",root,@"--session",session,@"--record",recording ? @"1" : @"0"],nil,[NSString stringWithFormat:@"client-monitor-%d.log",getpid()]);
 }
@@ -552,16 +572,20 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
         else if([command isEqual:@"session"])event(@"session",@{@"processes":sessionProcesses()});
         else if([command isEqual:@"watch"])watchClient([options[@"record"] isEqual:@"1"]);
         else if([command isEqual:@"repair-retina"])configureRetinaMode(runtime());
+        // Builds the active engine's app bundle (pawpad_shell.h) without starting anything.
+        else if([command isEqual:@"app-shell"])event(@"app_shell_ready",@{@"loader":ensureShell(runtime())});
         else if([command isEqual:@"download"])event(@"download_complete",@{@"file":[download(options[@"url"],options[@"sha256"]) lastPathComponent]});
         else if([command isEqual:@"install-runtime"])installRuntime(options[@"archive"] ?: download(options[@"url"],options[@"sha256"]),options[@"sha256"],options[@"version"],[options[@"repair"] isEqual:@"1"]);
         else if([command isEqual:@"verify"]) {verifyRuntime(runtime(),state()[@"active_runtime"]);event(@"runtime_verified",nil);}
         else if([command isEqual:@"prepare"])prepare();
         else if([command isEqual:@"install-launcher"])installLauncher(options[@"installer"] ?: download(options[@"url"],options[@"sha256"]),options[@"sha256"]);
         // --metal-hud 1 shows Apple's Metal Performance HUD over the game; --metal-validation 1|2 turns on
-        // Metal's error checking (clientEnvironment); --logging off|crashes|graphics|custom.
+        // Metal's error checking (clientEnvironment); --app-shell 0 runs Wine's bare loader instead of
+        // the game's app bundle (pawpad_shell.h); --env "KEY=VALUE;…" adds a test's switches
+        // (extraEnvironment); --logging off|crashes|graphics|custom.
         // --record 1 records the session (Settings › Record performance): the flight recorder in
         // pawpad_recorder.h, and pawpad-perf's report when it ends.
-        else if([command isEqual:@"launch"])launchClient([options[@"metal-hud"] isEqual:@"1"],[options[@"metal-validation"] intValue],[options[@"record"] isEqual:@"1"],options[@"logging"] ?: @"off",options[@"logging-custom"]);
+        else if([command isEqual:@"launch"])launchClient([options[@"metal-hud"] isEqual:@"1"],[options[@"metal-validation"] intValue],![options[@"app-shell"] isEqual:@"0"],[options[@"record"] isEqual:@"1"],options[@"logging"] ?: @"off",options[@"logging-custom"],options[@"env"]);
         // A marker on the current session's timeline (--label: what is about to happen, e.g. "entering world").
         else if([command isEqual:@"mark"])markSession(options[@"label"]);
         else if([command isEqual:@"logging"])event(@"logging",@{@"setting":options[@"setting"] ?: @"off",@"environment":loggingEnvironment(options[@"setting"] ?: @"off",options[@"custom"])});

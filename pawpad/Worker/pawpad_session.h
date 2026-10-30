@@ -26,6 +26,7 @@ static NSArray *sessionProcesses(void) {
     if(!membershipCache)membershipCache=[NSMutableDictionary dictionary];
     if(membershipCache.count>256)[membershipCache removeAllObjects];
     NSString *engine=[[runtime() stringByResolvingSymlinksInPath] stringByAppendingString:@"/"];
+    NSString *shells=[[join(root,@"app-shell") stringByResolvingSymlinksInPath] stringByAppendingString:@"/"];
     NSString *table=capture(@"/bin/ps",@[@"-axo",@"pid=,lstart=,comm="]);
     if(!table)fail(@"session_check_failed");
     NSRegularExpression *rx=[NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d+)\\s+(\\S+\\s+\\S+\\s+\\d+\\s+\\S+\\s+\\d+)\\s+(.+)$" options:0 error:nil];
@@ -37,12 +38,13 @@ static NSArray *sessionProcesses(void) {
         NSString *pid=[line substringWithRange:[m rangeAtIndex:1]],*start=[line substringWithRange:[m rangeAtIndex:2]];
         NSString *identity=[NSString stringWithFormat:@"%@|%@",pid,start];
         if(membershipCache[identity]) { if([membershipCache[identity] boolValue])[found addObject:@{@"pid":@(pid.intValue),@"identity":start,@"kind":kind}];continue; }
-        // Pawpad's own Wine: the process runs this data folder's engine (its native executable,
+        // Pawpad's own Wine: the process runs this data folder's engine or its app bundle (its native executable,
         // one call to the kernel; lsof took seconds per process). Only Pawpad's environment uses it.
         char executable[PROC_PIDPATHINFO_MAXSIZE];
         // No path: it has just exited, or belongs to another user. Either way not Pawpad's.
         if(proc_pidpath(pid.intValue,executable,sizeof(executable))<=0)continue;
-        BOOL member=[[@(executable) stringByResolvingSymlinksInPath] hasPrefix:engine];
+        NSString *resolved=[@(executable) stringByResolvingSymlinksInPath];
+        BOOL member=[resolved hasPrefix:engine] || [resolved hasPrefix:shells];
         membershipCache[identity]=@(member);
         if(member)[found addObject:@{@"pid":@([pid intValue]),@"identity":start,@"kind":kind}];
     }
