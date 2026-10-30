@@ -102,6 +102,14 @@ def prepare_source(work):
     depth_cap=ROOT/'patches/dxmt-depth-rename-cap.patch'
     if hashlib.sha256(depth_cap.read_bytes()).hexdigest()!='b92bd73215ff8ada509bbd8680ff6fb42dca6fa55fb4fe77a5bcb9c2d2ad08c9':raise ValueError('Accepted depth-rename patch changed')
     run('git','apply',depth_cap,cwd=source);upstream['depth-rename-cap']=depth_cap
+    # Pawpad: per-pass GPU timing for diagnosis, off unless DXMT_PASS_TIMING is set (lab tool).
+    pass_timing=ROOT/'patches/dxmt-pass-timing.patch'
+    if hashlib.sha256(pass_timing.read_bytes()).hexdigest()!='1182d71734a63209882cae87a9c1b1145b8f9886d7e262b5acc4120039c715a3':raise ValueError('Accepted pass-timing patch changed')
+    run('git','apply',pass_timing,cwd=source);upstream['pass-timing']=pass_timing
+    # Pawpad: 8 MB frame-log segments, so a one-hour session keeps all its frames (2 MB kept ~20 minutes).
+    frame_log=ROOT/'patches/dxmt-frame-log-segments.patch'
+    if hashlib.sha256(frame_log.read_bytes()).hexdigest()!='20c0d3a3373104f3020fa5b929e194538e0e3a85abdbf223b2d70e61a87c6211':raise ValueError('Accepted frame-log patch changed')
+    run('git','apply',frame_log,cwd=source);upstream['frame-log-segments']=frame_log
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream}
 
 
