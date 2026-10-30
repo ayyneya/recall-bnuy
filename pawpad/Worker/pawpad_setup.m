@@ -474,7 +474,7 @@ static NSDictionary *extraEnvironment(NSString *spec) {
     }
     return extra;
 }
-static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, NSString *logging, NSString *loggingCustom, NSString *extraSpec, BOOL metalfx, NSString *sharpening) {
+static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, NSString *logging, NSString *loggingCustom, NSString *extraSpec, BOOL metalfx, NSString *sharpening, BOOL mouselook) {
     // Both checked before anything changes: a rejected --env leaves the session and settings alone.
     NSDictionary *logs=loggingEnvironment(logging,loggingCustom),*extra=extraEnvironment(extraSpec);
     requireRosetta();
@@ -508,6 +508,9 @@ static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, N
     if(displays) {NSMutableDictionary *s=state();s[@"session_displays"]=displays;writeJSON(s,join(root,@"state.json"));}
     NSMutableDictionary *env=clientEnvironment(wineEnv(engine),hud,validation);
     if(metalfx)[env addEntriesFromDictionary:aniimoMetalFXEnvironment()];
+    // --mouselook 0: this launch goes without mouse-look (WINEMAC_MOUSELOOK), to test whether the
+    // cursor hiding and showing again is behind the GPU resets in play (30 Oct).
+    if(!mouselook)[env removeObjectForKey:@"WINEMAC_MOUSELOOK"];
     // The launcher, and the game it starts, run inside the game's app bundle (pawpad_shell.h).
     NSString *loader=shell ? ensureShell(engine) : join(engine,@"bin/wine");
     env[@"WINELOADER"]=loader;
@@ -517,7 +520,7 @@ static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, N
     [env addEntriesFromDictionary:logs];
     NSMutableDictionary *record=[@{@"logging":logs.count ? logging : @"off",@"winedebug":env[@"WINEDEBUG"],@"dxmt_log_level":env[@"DXMT_LOG_LEVEL"],
         @"runtime":state()[@"active_runtime"],@"game":gameExecutable(),@"metal_hud":@(hud),@"metal_validation":@(validation),@"app_shell":@(shell),@"profile":pawpadProfileVersion,@"retina_mode":@(retinaModeOn()),
-        @"recording":@(recording),@"metalfx":@(metalfx)} mutableCopy];
+        @"recording":@(recording),@"metalfx":@(metalfx),@"mouselook":@(mouselook)} mutableCopy];
     if(sharpness)record[@"metalfx_sharpness"]=sharpness;
     if([logging isEqual:@"custom"])record[@"logging_custom"]=loggingCustom;
     if(extra.count)record[@"extra_env"]=extra;
@@ -604,7 +607,8 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
         // pawpad_recorder.h, and pawpad-perf's report when it ends.
         // --metalfx 1 offers DLSS on MetalFX, with --sharpening off|low|high (pawpad_metalfx.h); off by
         // default, and a launch without it puts back what an earlier one changed.
-        else if([command isEqual:@"launch"])launchClient([options[@"metal-hud"] isEqual:@"1"],[options[@"metal-validation"] intValue],![options[@"app-shell"] isEqual:@"0"],[options[@"record"] isEqual:@"1"],options[@"logging"] ?: @"off",options[@"logging-custom"],options[@"env"],[options[@"metalfx"] isEqual:@"1"],options[@"sharpening"] ?: @"off");
+        // --mouselook 0 launches without mouse-look (a test; on by default).
+        else if([command isEqual:@"launch"])launchClient([options[@"metal-hud"] isEqual:@"1"],[options[@"metal-validation"] intValue],![options[@"app-shell"] isEqual:@"0"],[options[@"record"] isEqual:@"1"],options[@"logging"] ?: @"off",options[@"logging-custom"],options[@"env"],[options[@"metalfx"] isEqual:@"1"],options[@"sharpening"] ?: @"off",![options[@"mouselook"] isEqual:@"0"]);
         // A marker on the current session's timeline (--label: what is about to happen, e.g. "entering world").
         else if([command isEqual:@"mark"])markSession(options[@"label"]);
         else if([command isEqual:@"logging"])event(@"logging",@{@"setting":options[@"setting"] ?: @"off",@"environment":loggingEnvironment(options[@"setting"] ?: @"off",options[@"custom"])});
