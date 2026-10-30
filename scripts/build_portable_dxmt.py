@@ -179,6 +179,11 @@ def prepare_source(work,discard_changes=False):
     error_detail=ROOT/'patches/dxmt-gpu-error-detail.patch'
     if hashlib.sha256(error_detail.read_bytes()).hexdigest()!='686834388dd03c0161420787efae596b1f9ae97d31deee45768b8d1930ee400d':raise ValueError('Accepted GPU-error-detail patch changed')
     use(error_detail);pawpad['gpu-error-detail']=error_detail
+    # Pawpad: the DLSS stand-in also exports NVSDK_NGX_D3D11_EvaluateFeature_C, the entry point NVIDIA's
+    # DLSS helpers (and so Streamline games such as Aniimo) evaluate through; without it nothing was upscaled.
+    ngx_evaluate_c=ROOT/'patches/dxmt-ngx-evaluate-c.patch'
+    if hashlib.sha256(ngx_evaluate_c.read_bytes()).hexdigest()!='bf932d0c9516c1d8291a230bb537a6298e3f8635b8d606d8db6ec106566e9555':raise ValueError('Accepted NGX EvaluateFeature_C patch changed')
+    use(ngx_evaluate_c);pawpad['ngx-evaluate-c']=ngx_evaluate_c
     if not reuse:record.write_text(json.dumps({'patches':patch_identity(),'state':tree_state(source)},indent=2)+'\n')
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream,'pawpad':pawpad}
 

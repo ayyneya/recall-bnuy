@@ -124,6 +124,10 @@ each checked against its SHA-256 in the script:
   which passes completed, were running (affected), faulted or never started,
   with their labels (`DXMT_BENCH_LABELS=1`). For diagnosing GPU hangs and
   resets; no measured GPU cost.
+- `dxmt-ngx-evaluate-c.patch`: the DLSS stand-in (`nvngx.dll`) also exports
+  `NVSDK_NGX_D3D11_EvaluateFeature_C` (and the D3D12 one, unsupported as
+  before). NVIDIA's DLSS helpers evaluate through it; Aniimo (DLSS through
+  Streamline) created the feature, never evaluated it, and showed a black world.
 
 `build_portable_dxmt.py` resets its DXMT tree (`<workspace>/dxmt-source`) only
 when it holds nothing but what an earlier run put there

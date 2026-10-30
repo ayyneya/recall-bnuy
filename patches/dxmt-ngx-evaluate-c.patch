@@ -1,0 +1,33 @@
+diff --git a/src/nvngx/nvngx.cpp b/src/nvngx/nvngx.cpp
+--- a/src/nvngx/nvngx.cpp
++++ b/src/nvngx/nvngx.cpp
+@@ -238,6 +238,17 @@
+     break;
+   }
+   return NVNGX_RESULT_FAIL;
++}
++
++// Pawpad: NVIDIA's DLSS helpers (NGX_D3D11_EVALUATE_DLSS_EXT in nvsdk_ngx_helpers_d3d.h) evaluate
++// through the C entry point, which only differs in the progress callback's type. Without it a game
++// using them (Aniimo, through Streamline) created the DLSS feature but never evaluated it, and its
++// upscaled picture stayed black.
++NVNGX_API NVNGX_RESULT
++NVSDK_NGX_D3D11_EvaluateFeature_C(
++    ID3D11DeviceContext *context, const unsigned int *handle, NVNGXParameter *params, void *callback
++) {
++  return NVSDK_NGX_D3D11_EvaluateFeature(context, handle, params, callback);
+ }
+ 
+ NVNGX_API NVNGX_RESULT
+@@ -542,6 +553,11 @@
+   return NVNGX_RESULT_FEATURE_NOT_SUPPORTED;
+ }
+ 
++NVNGX_API NVNGX_RESULT
++NVSDK_NGX_D3D12_EvaluateFeature_C(void *command_list, const unsigned int *handle, NVNGXParameter *params, void *callback) {
++  return NVNGX_RESULT_FEATURE_NOT_SUPPORTED;
++}
++
+ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason,
+                                LPVOID reserved) {
+   if (reason != DLL_PROCESS_ATTACH)
