@@ -189,6 +189,12 @@ def prepare_source(work,discard_changes=False):
     ngx_streamline=ROOT/'patches/dxmt-ngx-streamline-resources.patch'
     if hashlib.sha256(ngx_streamline.read_bytes()).hexdigest()!='b67b6775cf30006001c13441bb02bc7989649f1c67ab163a75bd2cc13f51eae5':raise ValueError('Accepted NGX Streamline-resources patch changed')
     use(ngx_streamline);pawpad['ngx-streamline-resources']=ngx_streamline
+    # Pawpad: after a GPU reset, upload signals the reset discarded are given from the CPU, so chunks
+    # waiting for them don't stall into the next reset; DXMT_GPU_ERROR_DETAIL=1 also reports a command
+    # buffer still unfinished 2 s in, with what its start waits for.
+    stall=ROOT/'patches/dxmt-gpu-stall-recovery.patch'
+    if hashlib.sha256(stall.read_bytes()).hexdigest()!='b9080bddefa3895dd6e0125c00f522ec0ceadecd1fdc33eaefa6267240790ce4':raise ValueError('Accepted GPU-stall recovery patch changed')
+    use(stall);pawpad['gpu-stall-recovery']=stall
     if not reuse:record.write_text(json.dumps({'patches':patch_identity(),'state':tree_state(source)},indent=2)+'\n')
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream,'pawpad':pawpad}
 

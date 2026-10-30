@@ -1,0 +1,140 @@
+diff --git a/src/dxmt/dxmt_command_queue.cpp b/src/dxmt/dxmt_command_queue.cpp
+--- a/src/dxmt/dxmt_command_queue.cpp
++++ b/src/dxmt/dxmt_command_queue.cpp
+@@ -61,6 +61,7 @@
+   if (env::getEnvVar("DXMT_BENCH") == "1")
+     gpu_timing_.reset(new FrameGpuTiming[kGpuTimingRing]);
+   argument_encoding_ctx.bench_labels = env::getEnvVar("DXMT_BENCH_LABELS") == "1";
++  stall_watch_ = env::getEnvVar("DXMT_GPU_ERROR_DETAIL") == "1";
+   argument_encoding_ctx.pass_timing = !env::getEnvVar("DXMT_PASS_TIMING").empty();
+   argument_encoding_ctx.pass_timing_barrier = env::getEnvVar("DXMT_PASS_TIMING_BARRIER") == "1";
+   if (argument_encoding_ctx.pass_timing)
+@@ -216,6 +217,14 @@
+   return 0;
+ }
+ 
++void
++CommandQueue::ReportStall(CommandChunk &chunk, const char *when, uint64_t waited_ms) {
++  ERR("GPU stall: frame ", chunk.frame_, " command buffer ", when, " after ", waited_ms, " ms (status ",
++      (int)chunk.attached_cmdbuf.status(), "); its start waits for resource upload ",
++      chunk.resource_initializer_event_id, ", the upload event is at ", initializer.signaledValue(), " (newest upload ",
++      initializer.lastCommittedValue(), "); queue event at ", event.signaledValue(), " of ", chunk.chunk_event_id);
++}
++
+ uint32_t
+ CommandQueue::WaitForFinishThread() {
+   env::setThreadName("dxmt-finish-thread");
+@@ -231,7 +240,17 @@
+     auto &chunk = chunks[internal_seq % kCommandChunkCount];
+     if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {
+       auto start = frame_trace_ ? FrameTelemetry::stamp() : FrameTelemetry::Stamp{};
++      // Every chunk's buffer ends by signaling its event id (ArgumentEncodingContext::flushCommands).
++      bool stalled = stall_watch_ && !event.waitUntilSignaledValue(chunk.chunk_event_id, 2000);
++      auto stall_start = clock::now();
++      if (stalled)
++        ReportStall(chunk, "unfinished", 2000);
+       chunk.attached_cmdbuf.waitUntilCompleted();
++      if (stalled)
++        ReportStall(
++            chunk, "ended",
++            2000 + std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() - stall_start).count()
++        );
+       if (frame_trace_) frame_trace_->span(FrameTelemetry::Completion, frame_trace_owner_, chunk.frame_, internal_seq, start);
+     }
+     if (gpu_timing_) {
+@@ -256,6 +275,10 @@
+     }
+     if (chunk.attached_cmdbuf.status() == WMTCommandBufferStatusError) {
+       ERR("Device error at frame ", chunk.frame_, ": ", chunk.attached_cmdbuf.error().description().getUTF8String());
++      // Pawpad: see ResourceInitializer::recoverLostSignals.
++      if (auto lost = initializer.recoverLostSignals())
++        ERR("Device error at frame ", chunk.frame_, ": ", lost,
++            " resource upload signal(s) lost in the GPU reset, now signaled from the CPU");
+     }
+     if (auto logs = chunk.attached_cmdbuf.logs()) {
+       for (auto &log : logs.elements()) {
+diff --git a/src/dxmt/dxmt_command_queue.hpp b/src/dxmt/dxmt_command_queue.hpp
+--- a/src/dxmt/dxmt_command_queue.hpp
++++ b/src/dxmt/dxmt_command_queue.hpp
+@@ -167,6 +167,11 @@
+ 
+   uint32_t WaitForFinishThread();
+ 
++  // Pawpad: with DXMT_GPU_ERROR_DETAIL=1 a command buffer still unfinished 2 s in is reported while
++  // it is stuck (what it waits for), and again when it ends.
++  bool stall_watch_ = false;
++  void ReportStall(CommandChunk &chunk, const char *when, uint64_t waited_ms);
++
+   std::atomic_uint64_t ready_for_encode = 1; // we start from 1, so 0 is always coherent
+   std::atomic_uint64_t ready_for_commit = 1;
+   std::atomic_uint64_t chunk_ongoing = 0;
+diff --git a/src/dxmt/dxmt_resource_initializer.cpp b/src/dxmt/dxmt_resource_initializer.cpp
+--- a/src/dxmt/dxmt_resource_initializer.cpp
++++ b/src/dxmt/dxmt_resource_initializer.cpp
+@@ -394,6 +394,7 @@
+   encode(cmdbuf);
+   cmdbuf.encodeSignalEvent(upload_queue_event_, seq_id);
+   cmdbuf.commit();
++  last_upload_ = cmdbuf;
+   reset();
+   cached_coherent_seq_id = upload_queue_event_.signaledValue();
+   gpu_command_heap_allocator.free_blocks(cached_coherent_seq_id);
+@@ -401,6 +402,20 @@
+ }
+ 
+ uint64_t
++ResourceInitializer::recoverLostSignals() {
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++  // Upload buffers finish in commit order: once the last one has, all of them have.
++  if (last_upload_)
++    last_upload_.waitUntilCompleted();
++  uint64_t expected = current_seq_id_ - 1, signaled = upload_queue_event_.signaledValue();
++  if (signaled >= expected)
++    return 0;
++  upload_queue_event_.signalValue(expected);
++  cached_coherent_seq_id = expected;
++  return expected - signaled;
++}
++
++uint64_t
+ ResourceInitializer::flushToWait() {
+   std::lock_guard<dxmt::mutex> lock(mutex_);
+ 
+diff --git a/src/dxmt/dxmt_resource_initializer.hpp b/src/dxmt/dxmt_resource_initializer.hpp
+--- a/src/dxmt/dxmt_resource_initializer.hpp
++++ b/src/dxmt/dxmt_resource_initializer.hpp
+@@ -68,6 +68,26 @@
+     return upload_queue_event_;
+   }
+ 
++  /*
++   * Pawpad: a GPU reset discards the upload command buffers in flight, their event signal with
++   * them, and every later chunk that waits for one of those values (flushToWait hands out the
++   * last committed one) stalls until the next reset: the resets came in chains. Once the upload
++   * queue has settled, the lost values are signaled from the CPU. Returns how many were lost.
++   */
++  uint64_t recoverLostSignals();
++
++  /* Pawpad: the newest value handed out and the one the event has reached (diagnostics; read
++   * without the lock). */
++  uint64_t
++  lastCommittedValue() const {
++    return current_seq_id_ - 1;
++  }
++
++  uint64_t
++  signaledValue() {
++    return upload_queue_event_.signaledValue();
++  }
++
+ private:
+   uint64_t flushInternal();
+ 
+@@ -144,6 +164,7 @@
+   WMT::Device device_;
+   WMT::Reference<WMT::CommandQueue> upload_queue_;
+   WMT::Reference<WMT::SharedEvent> upload_queue_event_;
++  WMT::Reference<WMT::CommandBuffer> last_upload_;
+   WMT::Reference<WMT::Buffer> zero_buffer_;
+   size_t zero_buffer_size_ = 0;
+   dxmt::mutex mutex_;
