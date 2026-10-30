@@ -1,0 +1,58 @@
+diff --git a/src/dxmt/dxmt_buffer.cpp b/src/dxmt/dxmt_buffer.cpp
+index ab5c052..c789b7c 100644
+--- a/src/dxmt/dxmt_buffer.cpp
++++ b/src/dxmt/dxmt_buffer.cpp
+@@ -17,6 +17,8 @@
+  */
+ 
+ #include "dxmt_resource_log.hpp"
++#include "log/log.hpp"
++#include <atomic>
+ #include "dxmt_buffer.hpp"
+ #include "dxmt_format.hpp"
+ #include "thread.hpp"
+@@ -49,6 +51,15 @@ BufferAllocation::BufferAllocation(WMT::Device device, const WMTBufferInfo &info
+     info_.memory.set(placed_buffer);
+   }
+   obj_ = device.newBuffer(info_);
++  // Pawpad: Metal can refuse an allocation (under memory pressure); the buffer then has no
++  // storage and a GPU address of 0, which shaders read through. Say so in the log.
++  if (!obj_) {
++    static std::atomic<uint32_t> refused = 0;
++    uint32_t n = ++refused;
++    if (n <= 20 || n % 100 == 0)
++      ERR("Metal refused a buffer allocation: ", info_.length, " bytes, options ", (uint32_t)info_.options,
++          " (", n, " refused so far)");
++  }
+   gpuAddress_ = info_.gpu_address;
+   mappedMemory_ = info_.memory.get_accessible_or_null();
+ };
+diff --git a/src/dxmt/dxmt_texture.cpp b/src/dxmt/dxmt_texture.cpp
+index bb42216..b4fa862 100644
+--- a/src/dxmt/dxmt_texture.cpp
++++ b/src/dxmt/dxmt_texture.cpp
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include "dxmt_resource_log.hpp"
++#include "log/log.hpp"
+ #include "dxmt_texture.hpp"
+ #include "dxmt_residency.hpp"
+ #include "wsi_platform.hpp"
+@@ -207,6 +208,16 @@ Texture::allocate(Flags<TextureAllocationFlag> flags) {
+     return new TextureAllocation(this, std::move(buffer), buffer_info.memory.get(), info, bytes_per_row_, flags);
+   }
+   auto texture = flags.test(TextureAllocationFlag::Shared) ? device_.newSharedTexture(info) : device_.newTexture(info);
++  // Pawpad: a texture Metal refused (under memory pressure) has no storage and samples as zero:
++  // black, or see-through where the shader uses alpha. Say so in the log.
++  if (!texture) {
++    static std::atomic<uint32_t> refused = 0;
++    uint32_t n = ++refused;
++    if (n <= 20 || n % 100 == 0)
++      ERR("Metal refused a texture allocation: ", info.width, "x", info.height, "x", info.depth, " array ",
++          info.array_length, " format ", (uint32_t)info.pixel_format, " mips ", (uint32_t)info.mipmap_level_count,
++          " (", n, " refused so far)");
++  }
+   return new TextureAllocation(this, std::move(texture), info, flags);
+ }
+ 

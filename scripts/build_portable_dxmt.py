@@ -87,6 +87,11 @@ def prepare_source(work):
         fix=ROOT/f'patches/dxmt-upstream-{name}.patch'
         if hashlib.sha256(fix.read_bytes()).hexdigest()!=digest:raise ValueError(f'Accepted upstream {name} patch changed')
         run('git','apply',fix,cwd=source);upstream[name]=fix
+    # Pawpad: say in the log when Metal refuses a texture or buffer allocation (the resource then
+    # has no storage: zeros when sampled, a GPU address of 0 for buffers). Logging only.
+    refused=ROOT/'patches/dxmt-log-refused-allocations.patch'
+    if hashlib.sha256(refused.read_bytes()).hexdigest()!='f791eba1c721b0a501ed545ba6418314a1c94dce54ef9ea861e780492b5b7492':raise ValueError('Accepted refused-allocation patch changed')
+    run('git','apply',refused,cwd=source);upstream['log-refused-allocations']=refused
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream}
 
 
