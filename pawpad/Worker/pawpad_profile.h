@@ -7,7 +7,7 @@
  * for Aniimo; a value changes here only with a measurement behind it (pawpad-lab perf-goal).
  *
  * pawpadProfileVersion goes into every session record, so reports can tell profiles apart. */
-static NSString *const pawpadProfileVersion=@"aniimo-2";
+static NSString *const pawpadProfileVersion=@"aniimo-3";
 static NSDictionary *aniimoEnvironment(NSString *game) {
     return @{
         // CrossOver's engine: DXMT for D3D10/11, built-in d3d11/dxgi/d3d10core/winemetal; no
@@ -41,10 +41,12 @@ static NSDictionary *aniimoEnvironment(NSString *game) {
         @"WINE_GAME_MODE":game,
     };
 }
-/* The renderer profile for the game (DXMT config syntax). Everything here is Recall's tuning for
- * Overwatch, kept until measured for Aniimo: shader IR released after compiling, uncapped
- * presentation, eight normal-priority compiler threads, one frame of latency and Recall's present
- * pacing (mode 3: the game thread sleeps the 10th percentile of recent frames' slack minus 1 ms).
+/* The renderer profile for the game (DXMT config syntax). Recall's tuning for Overwatch, kept until
+ * measured for Aniimo: shader IR released after compiling, uncapped presentation, eight
+ * normal-priority compiler threads, one frame of latency. Recall's present pacing (the game thread
+ * sleeps so input is sampled late) is off for Aniimo: it is GPU-bound, and the sleep made frame times
+ * uneven. Live, same spot, 2 runs each (30 Oct): 1% low 18.5/18.7 -> 22.8/22.9 FPS, stutters over
+ * 50 ms 4.8/5.2 -> 2.2/2.1 a minute, p99 39.0/37.1 -> 36.6/36.4 ms, average FPS unchanged.
  * Left out from Recall's profile: the fullscreen canvas (dxgi.fullscreenCanvas*,
  * dxgi.nativeFullscreen, dxgi.sharpPresentation), which forced Overwatch's size and drawing onto
  * the screen and gave Aniimo a quarter of a 4K image (24 Oct 2026). */
@@ -55,7 +57,5 @@ static NSString *aniimoRendererProfile(NSString *game) {
         @"d3d11.shaderCompilerThreads = 8",
         @"d3d11.shaderCompilerNormalPriority = True",
         @"dxgi.maxFrameLatency = 1",
-        @"dxgi.presentPacing = True",
-        @"dxgi.presentPacingMode = 3",
-        @"dxgi.presentPacingTargetUs = 1000",@""] componentsJoinedByString:@"\n"];
+        @"dxgi.presentPacing = False",@""] componentsJoinedByString:@"\n"];
 }
