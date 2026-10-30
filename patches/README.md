@@ -142,6 +142,10 @@ each checked against its SHA-256 in the script:
   buffer still unfinished 2 s in is reported while stuck and when it ends: the
   upload value its start waits for, where the upload event is, and the newest
   upload.
+- `dxmt-gpu-stall-watch-slices.patch`: the stall watch waits in 100 ms slices
+  and stops as soon as the buffer has ended. A failed or ignored buffer (after
+  a GPU timeout macOS ignores the game's submissions) never signals its event,
+  and the single 2 s wait made every such frame take 2 s.
 
 `build_portable_dxmt.py` resets its DXMT tree (`<workspace>/dxmt-source`) only
 when it holds nothing but what an earlier run put there
