@@ -1,0 +1,401 @@
+diff --git a/src/d3d11/d3d11_buffer.cpp b/src/d3d11/d3d11_buffer.cpp
+index c354db3..e7f1ce6 100644
+--- a/src/d3d11/d3d11_buffer.cpp
++++ b/src/d3d11/d3d11_buffer.cpp
+@@ -40,6 +40,8 @@ private:
+ #endif
+   bool structured;
+   bool allow_raw_view;
++  // Pawpad: Metal refused the buffer's storage at creation (CreateBuffer then fails)
++  bool allocation_refused_ = false;
+ 
+   Rc<DynamicBuffer> dynamic_;
+ 
+@@ -104,10 +106,15 @@ public:
+     }
+     auto allocation = buffer_->allocate(flags);
+     auto &initializer = device->GetDXMTDevice().queue().initializer;
+-    if (pInitialData) {
+-      allocation->updateContents(0, pInitialData->pSysMem, pDesc->ByteWidth);
+-    } else if (flags.test(BufferAllocationFlag::GpuPrivate)) {
+-      initializer.initWithZero(allocation.ptr(), 0, buffer_->length());
++    // Pawpad: a buffer whose storage Metal refused (memory pressure) gets nothing written through its
++    // null address; CreateBuffer returns E_OUTOFMEMORY instead.
++    allocation_refused_ = !allocation->buffer();
++    if (!allocation_refused_) {
++      if (pInitialData) {
++        allocation->updateContents(0, pInitialData->pSysMem, pDesc->ByteWidth);
++      } else if (flags.test(BufferAllocationFlag::GpuPrivate)) {
++        initializer.initWithZero(allocation.ptr(), 0, buffer_->length());
++      }
+     }
+     auto _ = buffer_->rename(std::move(allocation));
+     D3D11_ASSERT(_.ptr() == nullptr);
+@@ -118,6 +125,11 @@ public:
+     }
+   }
+ 
++  bool
++  allocationRefused() const {
++    return allocation_refused_;
++  }
++
+   HRESULT
+   STDMETHODCALLTYPE
+   QueryInterface(REFIID riid, void **ppvObject) override {
+@@ -314,7 +326,10 @@ CreateBuffer(
+     MTLD3D11Device *pDevice, const D3D11_BUFFER_DESC *pDesc, const D3D11_SUBRESOURCE_DATA *pInitialData,
+     ID3D11Buffer **ppBuffer
+ ) {
+-  *ppBuffer = reinterpret_cast<ID3D11Buffer *>(ref(new D3D11Buffer(pDesc, pInitialData, pDevice)));
++  Com<D3D11Buffer> buffer = new D3D11Buffer(pDesc, pInitialData, pDevice);
++  if (unlikely(buffer->allocationRefused()))
++    return E_OUTOFMEMORY;
++  *ppBuffer = reinterpret_cast<ID3D11Buffer *>(ref(buffer.ptr()));
+   return S_OK;
+ }
+ 
+diff --git a/src/d3d11/d3d11_context_imm.cpp b/src/d3d11/d3d11_context_imm.cpp
+index 112e978..e029a1d 100644
+--- a/src/d3d11/d3d11_context_imm.cpp
++++ b/src/d3d11/d3d11_context_imm.cpp
+@@ -125,7 +125,12 @@ public:
+         allocation->useSuballocation(next_sub);
+       });
+     } else {
+-      dynamic->updateImmediateName(current_seq_id, dynamic->allocate(coherent_seq_id), 0, false);
++      auto allocation = dynamic->allocate(coherent_seq_id);
++      // Pawpad: Metal refused a fresh allocation (memory pressure). It is dropped, not renamed to and
++      // recycled, and Map fails with E_OUTOFMEMORY instead of handing out an address based on null.
++      if (unlikely(!allocation->buffer()))
++        return nullptr;
++      dynamic->updateImmediateName(current_seq_id, std::move(allocation), 0, false);
+       EmitST([allocation = dynamic->immediateName(),
+               buffer = Rc(dynamic->buffer)](ArgumentEncodingContext &enc) mutable {
+         allocation->useSuballocation(0);
+@@ -173,6 +178,8 @@ public:
+         }
+ 
+         pMappedResource->pData = MapDynamicBuffer(dynamic, current_seq_id, coherent_seq_id);
++        if (unlikely(!pMappedResource->pData))
++          return E_OUTOFMEMORY;
+         pMappedResource->RowPitch = buffer_length;
+         pMappedResource->DepthPitch = buffer_length;
+         break;
+@@ -200,6 +207,8 @@ public:
+         }
+ 
+         pMappedResource->pData = MapDynamicBuffer(dynamic, current_seq_id, coherent_seq_id);
++        if (unlikely(!pMappedResource->pData))
++          return E_OUTOFMEMORY;
+         pMappedResource->RowPitch = row_pitch;
+         pMappedResource->DepthPitch = depth_pitch;
+         break;
+@@ -219,7 +228,10 @@ public:
+           stage.SRVs.set_dirty();
+         }
+ 
+-        dynamic->updateImmediateName(current_seq_id, dynamic->allocate(coherent_seq_id), false);
++        auto allocation = dynamic->allocate(coherent_seq_id);
++        if (unlikely(!allocation->texture()))
++          return E_OUTOFMEMORY;
++        dynamic->updateImmediateName(current_seq_id, std::move(allocation), false);
+         EmitST([allocation = dynamic->immediateName(),
+               texture = Rc(dynamic->texture)](ArgumentEncodingContext &enc) mutable {
+           auto _ = texture->rename(forward_rc(allocation));
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index f1cb6f4..e81d3cd 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -858,6 +858,7 @@ public:
+         }
+         return ClearRenderTargetView(rtv, Color);
+       }
++      EnsurePixelFormatView(rtv->texture());
+       InvalidateCurrentPass(true);
+       EmitST([texture = rtv->texture(), view = rtv->viewId()](ArgumentEncodingContext &enc) {
+         enc.clear_rt_cmd.begin(texture, view);
+@@ -1023,6 +1024,10 @@ public:
+       ERR("ResolveSubresource: invalid format ", Format);
+       return;
+     }
++    // Pawpad: the resolve views both textures in FORMAT on the encode thread; one still without
++    // PixelFormatView (DXMT_DEFER_PIXEL_FORMAT_VIEW) moves first, in stream order.
++    EnsurePixelFormatView(static_cast<D3D11ResourceCommon *>(pSrcResource)->texture(), format_desc.PixelFormat);
++    EnsurePixelFormatView(static_cast<D3D11ResourceCommon *>(pDstResource)->texture(), format_desc.PixelFormat);
+     InvalidateCurrentPass();
+     EmitOP([src = static_cast<D3D11ResourceCommon *>(pSrcResource)->texture(),
+             dst = static_cast<D3D11ResourceCommon *>(pDstResource)->texture(),
+@@ -4649,6 +4654,14 @@ public:
+       EnsureShaderWrite(texture);
+   }
+ 
++  // Pawpad: the same for a view in FORMAT that DXMT itself makes on the encode thread (resolves,
++  // MetalFX's motion vectors), which no view the game created has flagged yet.
++  void
++  EnsurePixelFormatView(const Rc<Texture> &texture, WMTPixelFormat format) {
++    if (unlikely(texture && (texture->pixelFormatViewNeeded() || texture->pixelFormatViewNeededFor(format))))
++      EnsureShaderWrite(texture);
++  }
++
+   void
+   EnsureShaderWrite(const Rc<Texture> &texture) {
+     if (likely(!texture || !texture->shaderWriteDeferred()))
+@@ -4664,8 +4677,17 @@ public:
+       for (unsigned slice = 0; slice < slices; slice++)
+         for (unsigned level = 0; level < levels; level++)
+           source = enc.access(texture, level, slice, ResourceAccess::Read);
++      bool pixel_format_view_needed = texture->pixelFormatViewNeeded();
+       texture->restoreShaderWrite();
+-      auto _ = texture->rename(texture->allocate(flags));
++      auto allocation = texture->allocate(flags);
++      // Pawpad: if Metal refused the allocation (memory pressure), the texture stays where it is,
++      // contents intact, and the next use tries again; a rename would leave it with no storage.
++      if (unlikely(!allocation->texture())) {
++        texture->redeferShaderWrite(pixel_format_view_needed);
++        ERR("Texture ", texture->width(), "x", texture->height(), " could not move: Metal refused the allocation");
++        return;
++      }
++      auto _ = texture->rename(std::move(allocation));
+       for (unsigned slice = 0; slice < slices; slice++) {
+         for (unsigned level = 0; level < levels; level++) {
+           auto destination = enc.access(texture, level, slice, ResourceAccess::Write);
+@@ -5367,6 +5389,9 @@ public:
+     // compressed, it showed in Overwatch as flat 16x16-pixel blocks.
+     bool output_deferred = output->shaderWriteDeferred();
+     ctx_->EnsureShaderWrite(output);
++    // Pawpad: MetalFX reads the motion vectors through a view in motion_vector_format, made on the
++    // encode thread; a texture still without PixelFormatView moves first.
++    ctx_->EnsurePixelFormatView(motion_vector, motion_vector_format);
+ 
+     // A content size of 0 means the whole input texture (MTL_TEMPORAL_UPSCALE_D3D11_DESC); MetalFX
+     // needs the real size, and never more than the texture holds.
+diff --git a/src/d3d11/d3d11_pipeline.cpp b/src/d3d11/d3d11_pipeline.cpp
+index 0ddfab7..c6073b0 100644
+--- a/src/d3d11/d3d11_pipeline.cpp
++++ b/src/d3d11/d3d11_pipeline.cpp
+@@ -10,9 +10,11 @@
+ 
+ namespace dxmt {
+ 
++// DXMT_PASS_TIMING implies the labels (CommandQueue turns them on for the encoders too)
+ static bool
+ bench_labels_enabled() {
+-  static const bool enabled = env::getEnvVar("DXMT_BENCH_LABELS") == "1";
++  static const bool enabled =
++      env::getEnvVar("DXMT_BENCH_LABELS") == "1" || !env::getEnvVar("DXMT_PASS_TIMING").empty();
+   return enabled;
+ }
+ 
+diff --git a/src/d3d11/d3d11_recorder.cpp b/src/d3d11/d3d11_recorder.cpp
+index 0a2533f..6acecd1 100644
+--- a/src/d3d11/d3d11_recorder.cpp
++++ b/src/d3d11/d3d11_recorder.cpp
+@@ -2231,8 +2231,15 @@ Recorder::OnPresent(RecordingDevice *device, ID3D11Texture2D *backbuffer, UINT s
+   bool triggered = false;
+   if (state_ == State::Idle && !trigger_path_.empty() && present_count_ % 30 == 0 &&
+       GetFileAttributesW(trigger_path_.c_str()) != INVALID_FILE_ATTRIBUTES) {
+-    DeleteFileW(trigger_path_.c_str());
+-    triggered = true;
++    // One recording per trigger, so the file has to be gone. A trigger that can't be deleted (a
++    // folder, a read-only file, a folder without write access, where Wine reports success but the
++    // file stays) turns the trigger off instead of starting a recording after every recording.
++    if (DeleteFileW(trigger_path_.c_str()) && GetFileAttributesW(trigger_path_.c_str()) == INVALID_FILE_ATTRIBUTES) {
++      triggered = true;
++    } else {
++      ERR("recorder: DXMT_RECORD_TRIGGER can't be deleted; the trigger is off for this process");
++      trigger_path_.clear();
++    }
+   }
+   if (state_ == State::Idle && (pressed || triggered || (start_frame_ && present_count_ == start_frame_))) {
+     state_ = State::Armed;
+diff --git a/src/d3d11/d3d11_texture_device.cpp b/src/d3d11/d3d11_texture_device.cpp
+index 93cc7a3..3daf308 100644
+--- a/src/d3d11/d3d11_texture_device.cpp
++++ b/src/d3d11/d3d11_texture_device.cpp
+@@ -380,8 +380,9 @@ HRESULT CreateDeviceTextureInternal(MTLD3D11Device *pDevice,
+     info.usage = (WMTTextureUsage)(info.usage & ~deferred_usage);
+   }
+   // Pawpad: Texture::pixelFormatViewNeeded; DXMT_DEFER_PIXEL_FORMAT_VIEW=0 turns it off, =1 on.
++  // Multisample targets keep PixelFormatView: moving one would blit a multisample texture.
+   static const bool defer_pixel_format_view = env::getEnvVar("DXMT_DEFER_PIXEL_FORMAT_VIEW") == "1";
+-  if (defer_pixel_format_view && tag::dimension == D3D11_RESOURCE_DIMENSION_TEXTURE2D &&
++  if (defer_pixel_format_view && tag::dimension == D3D11_RESOURCE_DIMENSION_TEXTURE2D && info.sample_count <= 1 &&
+       (finalDesc.BindFlags & D3D11_BIND_RENDER_TARGET) && !(finalDesc.BindFlags & D3D11_BIND_DEPTH_STENCIL) &&
+       !finalDesc.CPUAccessFlags && !(finalDesc.MiscFlags & shared_flag) && (info.usage & WMTTextureUsagePixelFormatView)) {
+     deferred_usage = (WMTTextureUsage)(deferred_usage | WMTTextureUsagePixelFormatView);
+@@ -495,11 +496,19 @@ HRESULT CreateDeviceTextureInternal(MTLD3D11Device *pDevice,
+       return size_t(n < 1 ? 1 : n > 32 ? 32 : n);
+     }();
+     Rc<RenamableTexturePool> renamable = new RenamableTexturePool(texture.ptr(), depth_rename_cap, flags);
+-    initialize(renamable->getNext(0));
++    auto allocation = renamable->getNext(0);
++    // Pawpad: a texture whose storage Metal refused (memory pressure) is not created; the game gets
++    // E_OUTOFMEMORY instead of a texture that samples as zero.
++    if (unlikely(!allocation->texture()))
++      return E_OUTOFMEMORY;
++    initialize(std::move(allocation));
+     *ppTexture = reinterpret_cast<typename tag::COM_IMPL *>(
+         ref(new DeviceTexture<tag>(&finalDesc, std::move(texture), std::move(renamable), pDevice)));
+   } else {
+-    initialize(texture->allocate(flags));
++    auto allocation = texture->allocate(flags);
++    if (unlikely(!allocation->texture()))
++      return E_OUTOFMEMORY;
++    initialize(std::move(allocation));
+     *ppTexture = reinterpret_cast<typename tag::COM_IMPL *>(
+         ref(new DeviceTexture<tag>(&finalDesc, std::move(texture), pDevice)));
+   }
+diff --git a/src/dxmt/dxmt_context.cpp b/src/dxmt/dxmt_context.cpp
+index 1f27d50..376937b 100644
+--- a/src/dxmt/dxmt_context.cpp
++++ b/src/dxmt/dxmt_context.cpp
+@@ -1813,6 +1813,10 @@ ArgumentEncodingContext::isResolveSignatureMatched(RenderEncoderData *render, Re
+     auto &descriptor_src = resolve->src->allocation->descriptor;
+     auto &descriptor_dst = resolve->dst->allocation->descriptor;
+     auto color_format = descriptor_src->pixelFormat(color.attachment->key);
++    // Pawpad: merging views both textures in the render target's format; one still without
++    // PixelFormatView (DXMT_DEFER_PIXEL_FORMAT_VIEW) keeps its separate resolve pass instead.
++    if (descriptor_src->pixelFormatViewNeededFor(color_format) || descriptor_dst->pixelFormatViewNeededFor(color_format))
++      continue;
+     auto view_src_in_color_format = descriptor_src->checkViewUseFormat(resolve->src->key, color_format);
+     if (color.attachment->key == view_src_in_color_format) {
+       auto view_dst_in_color_format = descriptor_dst->checkViewUseFormat(resolve->dst->key, color_format);
+diff --git a/src/dxmt/dxmt_texture.cpp b/src/dxmt/dxmt_texture.cpp
+index 5dbcb47..835b56d 100644
+--- a/src/dxmt/dxmt_texture.cpp
++++ b/src/dxmt/dxmt_texture.cpp
+@@ -70,6 +70,7 @@ TextureAllocation::TextureAllocation(
+     flags_(flags) {
+   auto info_copy = info;
+   obj_ = buffer_.newTexture(info_copy, 0, bytes_per_row);
++  pixel_format_view_ = info.usage & WMTTextureUsagePixelFormatView;
+ 
+   gpuResourceID = info_copy.gpu_resource_id;
+   machPort = 0;
+@@ -86,6 +87,7 @@ TextureAllocation::TextureAllocation(
+     obj_(std::move(texture)),
+     flags_(flags) {
+   mappedMemory = nullptr;
++  pixel_format_view_ = textureDescriptor.usage & WMTTextureUsagePixelFormatView;
+   gpuResourceID = textureDescriptor.gpu_resource_id;
+   machPort = textureDescriptor.mach_port;
+   fenceTrackers.resize(
+@@ -110,7 +112,13 @@ Texture::prepareAllocationViews(TextureAllocation *allocation) {
+   }
+   std::shared_lock<dxmt::shared_mutex> lock(mutex_);
+   for (unsigned version = allocation->version_; version < version_; version++) {
+-    allocation->cached_view_.push_back(new TextureView(allocation, version, viewDescriptors_[version]));
++    // Pawpad: a view in another format of an allocation without PixelFormatView (a deferred render
++    // target, DXMT_DEFER_PIXEL_FORMAT_VIEW) is made only when used: commands queued before the texture
++    // moves still use this allocation through its other views, and Metal rejects the view.
++    if (!allocation->pixel_format_view_ && viewDescriptors_[version].format != viewDescriptors_[0].format)
++      allocation->cached_view_.push_back(TextureViewRef());
++    else
++      allocation->cached_view_.push_back(new TextureView(allocation, version, viewDescriptors_[version]));
+   }
+   allocation->version_ = version_;
+ }
+@@ -142,6 +150,13 @@ Texture::createView(TextureViewDescriptor const &descriptor) {
+   return TextureViewKey(descriptor, i, info_.mipmap_level_count);
+ }
+ 
++bool
++Texture::pixelFormatViewNeededFor(WMTPixelFormat format) const {
++  // the first view descriptor's format, without taking the lock: info_.pixel_format never changes
++  return (deferred_usage_ & WMTTextureUsagePixelFormatView) && shader_write_deferred_.load(std::memory_order_acquire) &&
++         format != ORIGINAL_FORMAT(info_.pixel_format);
++}
++
+ Texture::Texture(const WMTTextureInfo &descriptor, WMT::Device device) :
+     info_(descriptor),
+     device_(device) {
+@@ -259,7 +274,12 @@ Texture::view(TextureViewKey key, TextureAllocation* allocation) {
+   if (unlikely(allocation->version_ != version_)) {
+     prepareAllocationViews(allocation);
+   }
+-  return *allocation->cached_view_[key.index];
++  auto &view = allocation->cached_view_[key.index];
++  if (unlikely(!view)) {
++    std::shared_lock<dxmt::shared_mutex> lock(mutex_);
++    view = TextureViewRef(new TextureView(allocation, key.index, viewDescriptors_[key.index]));
++  }
++  return *view;
+ }
+ 
+ TextureViewKey Texture::checkViewUseArray(TextureViewKey key, bool isArray) {
+@@ -366,7 +386,12 @@ RenamableTexturePool::getNext(uint64_t frame) {
+   }
+   auto current_index = current_index_++ % capacity_;
+   if (!allocations_[current_index].ptr()) {
+-    allocations_[current_index] = texture_->allocate(allocation_flags_);
++    auto allocation = texture_->allocate(allocation_flags_);
++    // Pawpad: a copy Metal refused (memory pressure) is not kept: its slot would come round with no
++    // storage. The rename is skipped (the texture stays where it is) and the slot is tried again later.
++    if (unlikely(!allocation->texture()) && texture_->current())
++      return texture_->current();
++    allocations_[current_index] = std::move(allocation);
+     // Pawpad: say when a depth texture's copies pile up (they are kept for its whole life).
+     unsigned copies = current_index + 1;
+     if (copies == 3 || copies == 9 || copies == 17 || copies == 32)
+diff --git a/src/dxmt/dxmt_texture.hpp b/src/dxmt/dxmt_texture.hpp
+index 7143db3..41b1eca 100644
+--- a/src/dxmt/dxmt_texture.hpp
++++ b/src/dxmt/dxmt_texture.hpp
+@@ -169,6 +169,8 @@ private:
+   WMT::Reference<WMT::Buffer> buffer_;
+   uint32_t version_ = 0;
+   Flags<TextureAllocationFlag> flags_;
++  // Pawpad: whether views in another format may be made of this allocation (MTLTextureUsagePixelFormatView)
++  bool pixel_format_view_ = true;
+   small_vector<TextureViewRef, 4> cached_view_;
+ };
+ 
+@@ -313,6 +315,12 @@ public:
+     return pixel_format_view_needed_.load(std::memory_order_acquire);
+   }
+ 
++  /**
++  Pawpad: whether a view in FORMAT, which DXMT itself is about to make (a resolve, MetalFX's motion
++  vectors), needs the move first: the texture is still without PixelFormatView and FORMAT isn't its own.
++  */
++  bool pixelFormatViewNeededFor(WMTPixelFormat format) const;
++
+   /**
+   \warning encode thread only; allocations made afterwards allow shader writes
+   */
+@@ -323,6 +331,18 @@ public:
+     shader_write_deferred_.store(false, std::memory_order_release);
+   }
+ 
++  /**
++  Pawpad: undoes restoreShaderWrite when Metal refused the allocation to move to, so the texture keeps
++  its contents where they are and the next use tries again.
++  \warning encode thread only
++  */
++  void
++  redeferShaderWrite(bool pixel_format_view_needed) {
++    info_.usage = (WMTTextureUsage)(info_.usage & ~deferred_usage_);
++    pixel_format_view_needed_.store(pixel_format_view_needed, std::memory_order_release);
++    shader_write_deferred_.store(true, std::memory_order_release);
++  }
++
+   Texture(const WMTTextureInfo &info, WMT::Device device);
+ 
+   Texture(unsigned bytes_per_image, unsigned bytes_per_row, const WMTTextureInfo &info, WMT::Device device);
+diff --git a/src/winemetal/unix/winemetal_unix.c b/src/winemetal/unix/winemetal_unix.c
+index afda285..05b20e7 100644
+--- a/src/winemetal/unix/winemetal_unix.c
++++ b/src/winemetal/unix/winemetal_unix.c
+@@ -2365,8 +2365,10 @@ GetChromaticity_xy(ColorSyncProfileRef profile, CFStringRef tag, float *out_x, f
+     return false;
+   }
+   icc_XYZ_t *data = (icc_XYZ_t *)CFDataGetBytePtr(tag_data);
+-  if (data->sig != 0x205a5958)
++  if (data->sig != 0x205a5958) {
++    CFRelease(tag_data);
+     return false;
++  }
+   double X = (int32_t)__builtin_bswap32(data->x) / 65536.0;
+   double Y = (int32_t)__builtin_bswap32(data->y) / 65536.0;
+   double Z = (int32_t)__builtin_bswap32(data->z) / 65536.0;

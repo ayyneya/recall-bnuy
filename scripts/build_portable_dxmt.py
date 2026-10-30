@@ -22,30 +22,75 @@ SIGNING=ROOT/'runtime/signing/recall-nvngx'
 def run(*args,**kwargs):return subprocess.run([str(a) for a in args],check=True,**kwargs)
 
 
-def prepare_source(work):
+# What build() itself puts into the source tree; it never counts as someone's work there.
+BUILD_FILES={'portable_metal.py'}
+
+
+def git_output(source,*args):return subprocess.check_output(['git','-C',str(source),*args])
+
+
+def tree_state(source):
+    """The tree's commit, tracked changes and untracked files (BUILD_FILES aside), hashed."""
+    state=hashlib.sha256(git_output(source,'rev-parse','HEAD'))
+    state.update(git_output(source,'diff','--binary','HEAD'))
+    for name in sorted(n.decode() for n in git_output(source,'ls-files','--others','--exclude-standard','-z').split(b'\0') if n):
+        if name not in BUILD_FILES:state.update(name.encode()+b'\0'+(source/name).read_bytes())
+    return state.hexdigest()
+
+
+def tree_clean(source):
+    """No tracked changes and no untracked files (BUILD_FILES aside): nothing a checkout could lose."""
+    out=git_output(source,'status','--porcelain','--untracked-files=all','-z').split(b'\0')
+    return all(line[3:].decode() in BUILD_FILES for line in out if line)
+
+
+def patch_identity():
+    """BASE, this script and every DXMT patch file: while none changes, a tree that an earlier run
+    prepared is what this run would prepare."""
+    identity=hashlib.sha256(BASE.encode()+Path(__file__).read_bytes())
+    for p in sorted((ROOT/'patches').glob('dxmt-*.patch')):identity.update(p.name.encode()+b'\0'+p.read_bytes())
+    return identity.hexdigest()
+
+
+def prepare_source(work,discard_changes=False):
     """DXMT at its pinned commit with the accepted patches, in WORK/dxmt-source. It is all the app
-    build needs (build_native_app.py --workspace WORK): its pipeline sources come from here."""
-    source=work/'dxmt-source'
-    if not source.exists():run('git','clone','--no-checkout','https://github.com/NerRobDog/dxmt',source)
-    # Every build starts from the pinned commit with nothing applied: the patches stack, so a tree
-    # left patched by an earlier build can't be checked patch by patch (a later patch changes the
-    # lines an earlier one is checked against).
-    run('git','-C',source,'checkout','--force','--detach',BASE)
-    run('git','-C',source,'clean','-fdq')
-    run('git','-C',source,'submodule','update','--init','--recursive')
+    build needs (build_native_app.py --workspace WORK): its pipeline sources come from here.
+
+    The tree is also where DXMT work happens, so it is only reset when it holds nothing but what an
+    earlier run of this script put there (WORK/dxmt-source.prepared.json): other edits or new files
+    stop the build, unless DISCARD_CHANGES. A tree prepared from the same patches is kept as it is,
+    which keeps the build incremental."""
+    source=work/'dxmt-source';record=work/'dxmt-source.prepared.json'
+    fresh=not source.exists()
+    if fresh:run('git','clone','--no-checkout','https://github.com/NerRobDog/dxmt',source)
+    kept=json.loads(record.read_text()) if record.exists() and not fresh else {}
+    state=None if fresh else tree_state(source)
+    reuse=state is not None and kept.get('state')==state and kept.get('patches')==patch_identity()
+    if not (fresh or reuse or discard_changes or kept.get('state')==state or tree_clean(source)):
+        raise ValueError(f'{source} holds changes this script did not make (edits or new files). Export them '
+                         'to a patch first, or run again with --discard-dxmt-changes to throw them away.')
+    def use(patch):
+        if not reuse:run('git','apply',patch,cwd=source)
+    # Every preparation starts from the pinned commit with nothing applied: the patches stack, so a
+    # tree left patched by an earlier build can't be checked patch by patch (a later patch changes
+    # the lines an earlier one is checked against).
+    if not reuse:
+        run('git','-C',source,'checkout','--force','--detach',BASE)
+        run('git','-C',source,'clean','-fdq')
+        run('git','-C',source,'submodule','update','--init','--recursive')
     current=subprocess.check_output(['git','-C',str(source/'include/native/directx'),'rev-parse','HEAD'],text=True).strip()
     if current!=HEADERS:raise ValueError('DirectX header identity mismatch')
     current=subprocess.check_output(['git','-C',str(source/'external/nvapi'),'rev-parse','HEAD'],text=True).strip()
     if current!=NVAPI:raise ValueError('NVAPI header identity mismatch')
     patch=ROOT/'patches/dxmt-v1-private.patch'
     if hashlib.sha256(patch.read_bytes()).hexdigest()!='5afcbde9512381c37e975450d08f7fd3cef1e8755739f1f5b4ae8f1563de5199':raise ValueError('Accepted renderer patch changed')
-    run('git','apply',patch,cwd=source)
+    use(patch)
     # v1.0: the play-tested performance work (DXMT replay branch e873a90) on top.
     performance=ROOT/'patches/dxmt-v1-performance.patch'
     if hashlib.sha256(performance.read_bytes()).hexdigest()!='b119feb670a3e2ffe656159118e99a75abc5b9a8097e77096c512a01b81861f2':raise ValueError('Accepted performance patch changed')
-    run('git','apply',performance,cwd=source)
+    use(performance)
     portable_patch=ROOT/'patches/dxmt-portable-metal.patch'
-    run('git','apply',portable_patch,cwd=source)
+    use(portable_patch)
     # 1.3: DLSS on MetalFX. Direct3D 12 entry points and NVIDIA's failure codes in the DLSS
     # stand-in, and a d3d12.dll whose device only answers NVIDIA Streamline's setup questions.
     # MetalFX writes the DLSS output with shader-write usage (the 1.2 compression keeps it from
@@ -55,23 +100,23 @@ def prepare_source(work):
     # Sharpening setting) is a contrast-adaptive pass, also compiled at run time.
     metalfx=ROOT/'patches/dxmt-metalfx-upscaling.patch'
     if hashlib.sha256(metalfx.read_bytes()).hexdigest()!='87ab3e3a74a1c140653d6d66cda6576049472c8999afab68bccc866e48028b17':raise ValueError('Accepted MetalFX patch changed')
-    run('git','apply',metalfx,cwd=source)
+    use(metalfx)
     # 1.4: the shader pack holds every learned pipeline. Its archives are hashed in pieces instead
     # of read whole, have no total size limit, and can be prepared in batches that each add one
     # (DXMT_PIPELINE_CACHE_APPEND); learning goes on until the disk is nearly full.
     shader_pack=ROOT/'patches/dxmt-shader-pack.patch'
     if hashlib.sha256(shader_pack.read_bytes()).hexdigest()!='26b64c19f499e4e7fbccfa9402ab0bdd5a0e383af2d5098aa00c9abcd7182773':raise ValueError('Accepted shader pack patch changed')
-    run('git','apply',shader_pack,cwd=source)
+    use(shader_pack)
     # Pawpad: a compute pipeline Metal refuses to build has its dispatches skipped. Encoding them
     # without a pipeline divided by zero in Apple's GPU driver and froze Aniimo at 100% loading.
     skip_failed=ROOT/'patches/dxmt-skip-failed-compute.patch'
     if hashlib.sha256(skip_failed.read_bytes()).hexdigest()!='9da53f1e033ba1b503e161cb450da47458c7b5ccc231a989335e9d1427e9cde5':raise ValueError('Accepted failed-pipeline patch changed')
-    run('git','apply',skip_failed,cwd=source)
+    use(skip_failed)
     # Pawpad: DXMT_RECORD_TRIGGER starts the D3D11 recorder when a file appears, so a recording
     # can begin once the game is in the world without pressing keys in the game.
     record_trigger=ROOT/'patches/dxmt-record-trigger.patch'
     if hashlib.sha256(record_trigger.read_bytes()).hexdigest()!='0d44e2d46fe721370ec8b94f6c473feb49c104562bc747b8d1c1a2737474c895':raise ValueError('Accepted record-trigger patch changed')
-    run('git','apply',record_trigger,cwd=source)
+    use(record_trigger)
     # Pawpad: fixes from upstream 3Shain/dxmt after the fork's base (aacfbd3), in three groups
     # (pawpad-lab perf-goal/research-dxmt-upstream.md). The shader translator: vector
     # firstbit_shi built invalid IR (d1c926c; Metal refused Aniimo's compute shader 32f49794 with
@@ -86,41 +131,52 @@ def prepare_source(work):
                         ('texture-fixes','0d13688b55b02ac81f61b3ff0ad1baa9ffde7ce6751bebbdbdb617a707a15c95')):
         fix=ROOT/f'patches/dxmt-upstream-{name}.patch'
         if hashlib.sha256(fix.read_bytes()).hexdigest()!=digest:raise ValueError(f'Accepted upstream {name} patch changed')
-        run('git','apply',fix,cwd=source);upstream[name]=fix
+        use(fix);upstream[name]=fix
+    pawpad={}
     # Pawpad: say in the log when Metal refuses a texture or buffer allocation (the resource then
     # has no storage: zeros when sampled, a GPU address of 0 for buffers). Logging only.
     refused=ROOT/'patches/dxmt-log-refused-allocations.patch'
     if hashlib.sha256(refused.read_bytes()).hexdigest()!='f791eba1c721b0a501ed545ba6418314a1c94dce54ef9ea861e780492b5b7492':raise ValueError('Accepted refused-allocation patch changed')
-    run('git','apply',refused,cwd=source);upstream['log-refused-allocations']=refused
+    use(refused);pawpad['log-refused-allocations']=refused
     # Pawpad: draws whose render pipeline Metal refused are skipped, as dispatches already are
     # (dxmt-skip-failed-compute); they used to run with the previously bound pipeline.
     render_skip=ROOT/'patches/dxmt-skip-failed-render.patch'
     if hashlib.sha256(render_skip.read_bytes()).hexdigest()!='20053fa0cad13ca5d7f52ad5741e002c8071f60547d1864a7a24466c39913ebc':raise ValueError('Accepted failed-render patch changed')
-    run('git','apply',render_skip,cwd=source);upstream['skip-failed-render']=render_skip
+    use(render_skip);pawpad['skip-failed-render']=render_skip
     # Pawpad: DXMT_DEPTH_RENAME_CAP limits the copies a depth texture gets from full clears in one
     # command buffer (default 32 as before), and the log says when a texture's copies pile up.
     depth_cap=ROOT/'patches/dxmt-depth-rename-cap.patch'
     if hashlib.sha256(depth_cap.read_bytes()).hexdigest()!='b92bd73215ff8ada509bbd8680ff6fb42dca6fa55fb4fe77a5bcb9c2d2ad08c9':raise ValueError('Accepted depth-rename patch changed')
-    run('git','apply',depth_cap,cwd=source);upstream['depth-rename-cap']=depth_cap
+    use(depth_cap);pawpad['depth-rename-cap']=depth_cap
     # Pawpad: per-pass GPU timing for diagnosis, off unless DXMT_PASS_TIMING is set (lab tool).
     pass_timing=ROOT/'patches/dxmt-pass-timing.patch'
     if hashlib.sha256(pass_timing.read_bytes()).hexdigest()!='1182d71734a63209882cae87a9c1b1145b8f9886d7e262b5acc4120039c715a3':raise ValueError('Accepted pass-timing patch changed')
-    run('git','apply',pass_timing,cwd=source);upstream['pass-timing']=pass_timing
+    use(pass_timing);pawpad['pass-timing']=pass_timing
     # Pawpad: 8 MB frame-log segments, so a one-hour session keeps all its frames (2 MB kept ~20 minutes).
     frame_log=ROOT/'patches/dxmt-frame-log-segments.patch'
     if hashlib.sha256(frame_log.read_bytes()).hexdigest()!='20c0d3a3373104f3020fa5b929e194538e0e3a85abdbf223b2d70e61a87c6211':raise ValueError('Accepted frame-log patch changed')
-    run('git','apply',frame_log,cwd=source);upstream['frame-log-segments']=frame_log
+    use(frame_log);pawpad['frame-log-segments']=frame_log
     # Pawpad: typeless 2D render targets start without PixelFormatView (DXMT_DEFER_PIXEL_FORMAT_VIEW=1),
     # which keeps Apple's lossless compression; a view in another format moves the texture first.
     defer_pfv=ROOT/'patches/dxmt-defer-pixel-format-view.patch'
     if hashlib.sha256(defer_pfv.read_bytes()).hexdigest()!='06414ea2d8f54c10a346be1f3ffb7bc3c4934da8d99347a91a68c0080c99e8c8':raise ValueError('Accepted deferred-PixelFormatView patch changed')
-    run('git','apply',defer_pfv,cwd=source);upstream['defer-pixel-format-view']=defer_pfv
-    return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream}
+    use(defer_pfv);pawpad['defer-pixel-format-view']=defer_pfv
+    # Pawpad: fixes from the 30 Oct code review. Views DXMT itself makes in another format (resolves,
+    # partial ClearView, MetalFX's motion vectors) move a deferred texture first, other-format views of
+    # an allocation without PixelFormatView are made when used, and multisample targets aren't
+    # deferred. A refused allocation is never used: a move or depth rename keeps the texture where it
+    # is, Map(WRITE_DISCARD) and creation fail with E_OUTOFMEMORY. The record trigger fires once per
+    # file, DXMT_PASS_TIMING registers shader tags, and the display query frees every ICC tag.
+    review=ROOT/'patches/dxmt-review-fixes.patch'
+    if hashlib.sha256(review.read_bytes()).hexdigest()!='82c0b7494c7162d7fd44f7168402aff5e7745670791279c239c8b96d716c8e35':raise ValueError('Accepted review-fixes patch changed')
+    use(review);pawpad['review-fixes']=review
+    if not reuse:record.write_text(json.dumps({'patches':patch_identity(),'state':tree_state(source)},indent=2)+'\n')
+    return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream,'pawpad':pawpad}
 
 
-def build(work,tools,jobs,signing=SIGNING):
+def build(work,tools,jobs,signing=SIGNING,discard_changes=False):
     if not (signing/sign_pe.KEY).is_file():raise ValueError(f'No signing certificate in {signing} (scripts/sign_pe.py create-certificate)')
-    source,patches=prepare_source(work);builddir=work/'dxmt-build';install=work/'dxmt-install'
+    source,patches=prepare_source(work,discard_changes);builddir=work/'dxmt-build';install=work/'dxmt-install'
     patch,performance,portable_patch,metalfx,shader_pack=(patches[k] for k in ('patch','performance','portable','metalfx','shader_pack'))
     wrapper=source/'portable_metal.py'
     shutil.copy2(ROOT/'scripts/portable_metal.py',wrapper);wrapper.chmod(0o755)
@@ -149,6 +205,7 @@ def build(work,tools,jobs,signing=SIGNING):
         'skip_failed_compute_patch_sha256':hashlib.sha256(patches['skip_failed'].read_bytes()).hexdigest(),
         'record_trigger_patch_sha256':hashlib.sha256(patches['record_trigger'].read_bytes()).hexdigest(),
         'upstream_patch_sha256':{k:hashlib.sha256(v.read_bytes()).hexdigest() for k,v in patches['upstream'].items()},
+        'pawpad_patch_sha256':{k:hashlib.sha256(v.read_bytes()).hexdigest() for k,v in patches['pawpad'].items()},
         'nvngx_certificate_sha256':hashlib.sha256((signing/sign_pe.LEAF).read_bytes()).hexdigest(),
         'portable_metal_patch_sha256':hashlib.sha256(portable_patch.read_bytes()).hexdigest(),
         'portable_metal_wrapper_sha256':hashlib.sha256(wrapper.read_bytes()).hexdigest(),
@@ -161,6 +218,7 @@ if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--workspace',type=Path,required=True)
     p.add_argument('--toolchains',type=Path,default=ROOT/'runtime/toolchains');p.add_argument('--jobs',type=int,choices=range(1,5),default=2)
     p.add_argument('--source-only',action='store_true',help='only fetch and patch DXMT (enough for build_native_app.py --workspace); no toolchains or signing needed')
+    p.add_argument('--discard-dxmt-changes',action='store_true',help='reset WORKSPACE/dxmt-source even if it holds edits or new files this script did not make (they are lost)')
     a=p.parse_args()
-    if a.source_only:a.workspace.mkdir(parents=True,exist_ok=True);prepare_source(a.workspace.resolve())
-    else:build(a.workspace.resolve(),a.toolchains.resolve(),a.jobs)
+    if a.source_only:a.workspace.mkdir(parents=True,exist_ok=True);prepare_source(a.workspace.resolve(),a.discard_dxmt_changes)
+    else:build(a.workspace.resolve(),a.toolchains.resolve(),a.jobs,discard_changes=a.discard_dxmt_changes)

@@ -118,7 +118,7 @@ checkout with Apple Command Line Tools, clang, make, pkg-config and Python 3.10+
 python3 scripts/build_portable_runtime.py --workspace runtime/phase-2 --download-only
 python3 scripts/build_portable_dependencies.py --workspace runtime/phase-2 --jobs 4
 python3 scripts/build_portable_runtime.py --workspace runtime/phase-2 --jobs 4
-python3 scripts/build_portable_dxmt.py --workspace runtime/phase-2 --jobs 2
+python3 scripts/build_portable_dxmt.py --workspace runtime/phase-2 --jobs 2   # keeps edits in dxmt-source; see patches/README.md
 python3 scripts/build_portable_setup.py --output runtime/phase-2/native/ow2-setup
 python3 scripts/assemble_portable_runtime.py --workspace runtime/phase-2
 python3 scripts/build_native_app.py --output runtime/build/Recall.app \
