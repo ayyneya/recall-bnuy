@@ -184,6 +184,11 @@ def prepare_source(work,discard_changes=False):
     ngx_evaluate_c=ROOT/'patches/dxmt-ngx-evaluate-c.patch'
     if hashlib.sha256(ngx_evaluate_c.read_bytes()).hexdigest()!='bf932d0c9516c1d8291a230bb537a6298e3f8635b8d606d8db6ec106566e9555':raise ValueError('Accepted NGX EvaluateFeature_C patch changed')
     use(ngx_evaluate_c);pawpad['ngx-evaluate-c']=ngx_evaluate_c
+    # Pawpad: NGX parameters set as void * (Streamline passes its D3D11/D3D12 resources so) read back as
+    # resources; a failed evaluation names the input it lacked, once.
+    ngx_streamline=ROOT/'patches/dxmt-ngx-streamline-resources.patch'
+    if hashlib.sha256(ngx_streamline.read_bytes()).hexdigest()!='b67b6775cf30006001c13441bb02bc7989649f1c67ab163a75bd2cc13f51eae5':raise ValueError('Accepted NGX Streamline-resources patch changed')
+    use(ngx_streamline);pawpad['ngx-streamline-resources']=ngx_streamline
     if not reuse:record.write_text(json.dumps({'patches':patch_identity(),'state':tree_state(source)},indent=2)+'\n')
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream,'pawpad':pawpad}
 

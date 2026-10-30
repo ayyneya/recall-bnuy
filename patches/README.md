@@ -126,8 +126,13 @@ each checked against its SHA-256 in the script:
   resets; no measured GPU cost.
 - `dxmt-ngx-evaluate-c.patch`: the DLSS stand-in (`nvngx.dll`) also exports
   `NVSDK_NGX_D3D11_EvaluateFeature_C` (and the D3D12 one, unsupported as
-  before). NVIDIA's DLSS helpers evaluate through it; Aniimo (DLSS through
-  Streamline) created the feature, never evaluated it, and showed a black world.
+  before). NVIDIA's DLSS helpers evaluate through it.
+- `dxmt-ngx-streamline-resources.patch`: NGX parameters stored through the
+  `void *` setter read back as D3D11/D3D12 resources and the other way round.
+  Streamline (`sl.dlss`) passes the color, depth, motion and output textures
+  that way; the stand-in's evaluation failed at its first `Get` without a word,
+  so Aniimo (DLSS through Streamline) showed a black world. A failed evaluation
+  now names the input it lacked, once.
 
 `build_portable_dxmt.py` resets its DXMT tree (`<workspace>/dxmt-source`) only
 when it holds nothing but what an earlier run put there
