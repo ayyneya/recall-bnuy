@@ -110,6 +110,11 @@ def prepare_source(work):
     frame_log=ROOT/'patches/dxmt-frame-log-segments.patch'
     if hashlib.sha256(frame_log.read_bytes()).hexdigest()!='20c0d3a3373104f3020fa5b929e194538e0e3a85abdbf223b2d70e61a87c6211':raise ValueError('Accepted frame-log patch changed')
     run('git','apply',frame_log,cwd=source);upstream['frame-log-segments']=frame_log
+    # Pawpad: typeless 2D render targets start without PixelFormatView (DXMT_DEFER_PIXEL_FORMAT_VIEW=1),
+    # which keeps Apple's lossless compression; a view in another format moves the texture first.
+    defer_pfv=ROOT/'patches/dxmt-defer-pixel-format-view.patch'
+    if hashlib.sha256(defer_pfv.read_bytes()).hexdigest()!='06414ea2d8f54c10a346be1f3ffb7bc3c4934da8d99347a91a68c0080c99e8c8':raise ValueError('Accepted deferred-PixelFormatView patch changed')
+    run('git','apply',defer_pfv,cwd=source);upstream['defer-pixel-format-view']=defer_pfv
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream}
 
 

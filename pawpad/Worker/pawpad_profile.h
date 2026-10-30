@@ -7,7 +7,7 @@
  * for Aniimo; a value changes here only with a measurement behind it (pawpad-lab perf-goal).
  *
  * pawpadProfileVersion goes into every session record, so reports can tell profiles apart. */
-static NSString *const pawpadProfileVersion=@"aniimo-1";
+static NSString *const pawpadProfileVersion=@"aniimo-2";
 static NSDictionary *aniimoEnvironment(NSString *game) {
     return @{
         // CrossOver's engine: DXMT for D3D10/11, built-in d3d11/dxgi/d3d10core/winemetal; no
@@ -25,6 +25,11 @@ static NSDictionary *aniimoEnvironment(NSString *game) {
         @"DXMT_PREPARE_SHADERS":@"1",@"DXMT_USE_DEFAULT_METAL_CACHE":@"1",
         @"DXMT_PIPELINE_CACHE_NAMESPACE":@"aniimo-v1",@"DXMT_PIPELINE_CACHE_PREFER_EXPENSIVE":@"1",
         @"DXMT_PIPELINE_CACHE_PREWARM_LIMIT":@"128",@"DXMT_PIPELINE_CACHE_PREWARM_MS":@"10000",
+        // Typeless render targets without PixelFormatView until a view in another format needs it
+        // (patches/dxmt-defer-pixel-format-view.patch): keeps Apple's lossless compression on the
+        // game's HDR and G-buffer targets. Replay of the hub, 30 Oct: GPU 37.0-37.5 -> 34.7-35.0 ms
+        // a frame, images within the engine's own noise, no Metal validation errors.
+        @"DXMT_DEFER_PIXEL_FORMAT_VIEW":@"1",
         // Rosetta reports AVX (Unity's native code and Burst pick their paths from it).
         @"ROSETTA_ADVERTISE_AVX":@"1",
         // Synchronisation through Mach semaphores; write-copy simulation as Recall ships it.

@@ -1,0 +1,113 @@
+--- a/src/dxmt/dxmt_texture.hpp
++++ b/src/dxmt/dxmt_texture.hpp
+@@ -303,11 +303,23 @@
+   }
+ 
+   /**
++  Pawpad: typeless render targets can also start without PixelFormatView (DXMT_DEFER_PIXEL_FORMAT_VIEW),
++  which keeps Apple's lossless compression; almost all of them are only ever viewed in one format.
++  True once a view in another format exists: the next bind of the texture moves it to an allocation
++  with every deferred usage (MTLD3D11ContextImpl::EnsureShaderWrite), before that view is used.
++  */
++  bool
++  pixelFormatViewNeeded() const {
++    return pixel_format_view_needed_.load(std::memory_order_acquire);
++  }
++
++  /**
+   \warning encode thread only; allocations made afterwards allow shader writes
+   */
+   void
+   restoreShaderWrite() {
+     info_.usage = (WMTTextureUsage)(info_.usage | deferred_usage_);
++    pixel_format_view_needed_.store(false, std::memory_order_release);
+     shader_write_deferred_.store(false, std::memory_order_release);
+   }
+ 
+@@ -326,6 +338,7 @@
+   uint32_t version_ = 0;
+   std::atomic<uint32_t> refcount_ = {0u};
+   std::atomic<bool> shader_write_deferred_ = {false};
++  std::atomic<bool> pixel_format_view_needed_ = {false};
+   WMTTextureUsage deferred_usage_ = (WMTTextureUsage)0;
+ 
+   small_vector<TextureViewDescriptor, 4> viewDescriptors_;
+--- a/src/dxmt/dxmt_texture.cpp
++++ b/src/dxmt/dxmt_texture.cpp
+@@ -136,6 +136,9 @@
+   }
+   viewDescriptors_.push_back(descriptor);
+   version_ = version_ + 1;
++  if (descriptor.format != viewDescriptors_[0].format && (deferred_usage_ & WMTTextureUsagePixelFormatView) &&
++      shader_write_deferred_.load(std::memory_order_acquire))
++    pixel_format_view_needed_.store(true, std::memory_order_release);
+   return TextureViewKey(descriptor, i, info_.mipmap_level_count);
+ }
+ 
+--- a/src/d3d11/d3d11_texture_device.cpp
++++ b/src/d3d11/d3d11_texture_device.cpp
+@@ -378,6 +378,14 @@
+       !finalDesc.CPUAccessFlags && !(finalDesc.MiscFlags & shared_flag)) {
+     deferred_usage = (WMTTextureUsage)(info.usage & (WMTTextureUsageShaderWrite | WMTTextureUsageShaderAtomic));
+     info.usage = (WMTTextureUsage)(info.usage & ~deferred_usage);
++  }
++  // Pawpad: Texture::pixelFormatViewNeeded; DXMT_DEFER_PIXEL_FORMAT_VIEW=0 turns it off, =1 on.
++  static const bool defer_pixel_format_view = env::getEnvVar("DXMT_DEFER_PIXEL_FORMAT_VIEW") == "1";
++  if (defer_pixel_format_view && tag::dimension == D3D11_RESOURCE_DIMENSION_TEXTURE2D &&
++      (finalDesc.BindFlags & D3D11_BIND_RENDER_TARGET) && !(finalDesc.BindFlags & D3D11_BIND_DEPTH_STENCIL) &&
++      !finalDesc.CPUAccessFlags && !(finalDesc.MiscFlags & shared_flag) && (info.usage & WMTTextureUsagePixelFormatView)) {
++    deferred_usage = (WMTTextureUsage)(deferred_usage | WMTTextureUsagePixelFormatView);
++    info.usage = (WMTTextureUsage)(info.usage & ~WMTTextureUsagePixelFormatView);
+   }
+   auto texture = Rc<Texture>(new Texture(info, pDevice->GetMTLDevice()));
+   if (deferred_usage)
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -969,6 +969,7 @@
+       if (desc.ViewDimension == D3D11_SRV_DIMENSION_BUFFER || desc.ViewDimension == D3D11_SRV_DIMENSION_BUFFEREX) {
+         return;
+       }
++      EnsurePixelFormatView(srv->texture());
+       SwitchToBlitEncoder(CommandBufferState::BlitEncoderActive);
+       EmitOP([tex = srv->texture(), viewId = srv->viewId()](ArgumentEncodingContext &enc) {
+         // workaround: mipmap generation of a8unorm is borked, so use a r8unorm view
+@@ -2902,6 +2903,7 @@
+             continue;
+           BoundRTVs[rtv_index] = rtv;
+           should_invalidate_pass = true;
++          EnsurePixelFormatView(rtv->texture());
+           OMResolveSRVHazard(rtv);
+         } else {
+           if (BoundRTVs[rtv_index]) {
+@@ -3647,7 +3649,9 @@
+             enc.bindBuffer<Stage>(slot, forward_rc(buffer), viewId, slice);
+           });
+         } else {
+-          EmitST([=, texture = pView->texture(), viewId = pView->viewId()](ArgumentEncodingContext &enc) mutable {
++          auto texture = pView->texture();
++          EnsurePixelFormatView(texture);
++          EmitST([=, texture = std::move(texture), viewId = pView->viewId()](ArgumentEncodingContext &enc) mutable {
+             enc.bindTexture<Stage>(slot, forward_rc(texture), viewId);
+           });
+         }
+@@ -4427,6 +4431,7 @@
+ 
+   void
+   ClearRenderTargetView(D3D11RenderTargetView *pRenderTargetView, const FLOAT ColorRGBA[4]) {
++    EnsurePixelFormatView(pRenderTargetView->texture());
+     InvalidateCurrentPass();
+     auto clear_color = WMTClearColor{ColorRGBA[0], ColorRGBA[1], ColorRGBA[2], ColorRGBA[3]};
+     auto &props = pRenderTargetView->description();
+@@ -4639,6 +4644,12 @@
+   before the encode thread gets to the first are no-ops.
+   */
+   void
++  EnsurePixelFormatView(const Rc<Texture> &texture) {
++    if (unlikely(texture && texture->pixelFormatViewNeeded()))
++      EnsureShaderWrite(texture);
++  }
++
++  void
+   EnsureShaderWrite(const Rc<Texture> &texture) {
+     if (likely(!texture || !texture->shaderWriteDeferred()))
+       return;
