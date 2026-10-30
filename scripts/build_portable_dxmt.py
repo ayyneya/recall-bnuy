@@ -72,7 +72,22 @@ def prepare_source(work):
     record_trigger=ROOT/'patches/dxmt-record-trigger.patch'
     if hashlib.sha256(record_trigger.read_bytes()).hexdigest()!='0d44e2d46fe721370ec8b94f6c473feb49c104562bc747b8d1c1a2737474c895':raise ValueError('Accepted record-trigger patch changed')
     run('git','apply',record_trigger,cwd=source)
-    return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger}
+    # Pawpad: fixes from upstream 3Shain/dxmt after the fork's base (aacfbd3), in three groups
+    # (pawpad-lab perf-goal/research-dxmt-upstream.md). The shader translator: vector
+    # firstbit_shi built invalid IR (d1c926c; Metal refused Aniimo's compute shader 32f49794 with
+    # "Failed to materializeAll"), logic flaws (ae91269), call return points (9839e55), queries on
+    # null texture descriptors (64ee6f5); AIRCONV_VERSION 124 (the fork's 24 plus these), so the
+    # shader cache keeps them apart. The display queries made every Present leak (d815f7f,
+    # a741a3f). Copies between texture types were dropped (e40c9d7: a Unity game's 3D colour
+    # grading table stayed black) and clears used the full texture size for a mip (f9beaea).
+    upstream={}
+    for name,digest in (('airconv','5a337b451f4f9e0a114ba32a80652d9cf2bfa52037c94feca4a830573984781c'),
+                        ('display-leaks','b0afd37b931fdf53768301f8b3eb8d7f7b56dea69d38904bb1349a0fc701af11'),
+                        ('texture-fixes','0d13688b55b02ac81f61b3ff0ad1baa9ffde7ce6751bebbdbdb617a707a15c95')):
+        fix=ROOT/f'patches/dxmt-upstream-{name}.patch'
+        if hashlib.sha256(fix.read_bytes()).hexdigest()!=digest:raise ValueError(f'Accepted upstream {name} patch changed')
+        run('git','apply',fix,cwd=source);upstream[name]=fix
+    return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream}
 
 
 def build(work,tools,jobs,signing=SIGNING):
@@ -105,6 +120,7 @@ def build(work,tools,jobs,signing=SIGNING):
         'shader_pack_patch_sha256':hashlib.sha256(shader_pack.read_bytes()).hexdigest(),
         'skip_failed_compute_patch_sha256':hashlib.sha256(patches['skip_failed'].read_bytes()).hexdigest(),
         'record_trigger_patch_sha256':hashlib.sha256(patches['record_trigger'].read_bytes()).hexdigest(),
+        'upstream_patch_sha256':{k:hashlib.sha256(v.read_bytes()).hexdigest() for k,v in patches['upstream'].items()},
         'nvngx_certificate_sha256':hashlib.sha256((signing/sign_pe.LEAF).read_bytes()).hexdigest(),
         'portable_metal_patch_sha256':hashlib.sha256(portable_patch.read_bytes()).hexdigest(),
         'portable_metal_wrapper_sha256':hashlib.sha256(wrapper.read_bytes()).hexdigest(),
