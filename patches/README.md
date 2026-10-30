@@ -113,6 +113,17 @@ each checked against its SHA-256 in the script:
   trigger starts one recording per file and switches itself off when the file
   can't be deleted; `DXMT_PASS_TIMING` alone registers the shader tags; the
   display query frees every ICC tag it reads.
+- `dxmt-rename-uav-buffers.patch` (`DXMT_RENAME_UAV_BUFFERS=1`, off by default):
+  a whole-buffer `UpdateSubresource` of a GPU-writable (UAV) DEFAULT buffer gets
+  a fresh CPU-writable allocation, as `Map(WRITE_DISCARD)` does for other
+  buffers, instead of a staging copy in a blit encoder that splits the compute
+  work around it. Aniimo does ~82 such updates a frame; replay of the hub with
+  the screen covered: GPU 33.56 -> 33.41 ms a frame.
+- `dxmt-gpu-error-detail.patch` (`DXMT_GPU_ERROR_DETAIL=1`, off by default):
+  command buffers record every encoder's execution state, and a failed one logs
+  which passes completed, were running (affected), faulted or never started,
+  with their labels (`DXMT_BENCH_LABELS=1`). For diagnosing GPU hangs and
+  resets; no measured GPU cost.
 
 `build_portable_dxmt.py` resets its DXMT tree (`<workspace>/dxmt-source`) only
 when it holds nothing but what an earlier run put there

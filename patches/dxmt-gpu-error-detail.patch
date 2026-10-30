@@ -1,0 +1,67 @@
+diff --git a/src/winemetal/unix/winemetal_unix.c b/src/winemetal/unix/winemetal_unix.c
+--- a/src/winemetal/unix/winemetal_unix.c
++++ b/src/winemetal/unix/winemetal_unix.c
+@@ -122,9 +122,28 @@
+   return STATUS_SUCCESS;
+ }
+ 
++/* Pawpad: DXMT_GPU_ERROR_DETAIL=1 asks Metal to record every encoder's execution state, so a
++   failed command buffer says which pass was running, waiting or faulting (_MTLCommandBuffer_error). */
++static bool
++gpu_error_detail(void) {
++  static int enabled = -1;
++  if (enabled < 0) {
++    const char *v = getenv("DXMT_GPU_ERROR_DETAIL");
++    enabled = v && v[0] == '1';
++  }
++  return enabled;
++}
++
+ static NTSTATUS
+ _MTLCommandQueue_commandBuffer(void *obj) {
+   struct unixcall_generic_obj_obj_ret *params = obj;
++  if (gpu_error_detail()) {
++    MTLCommandBufferDescriptor *desc = [[MTLCommandBufferDescriptor alloc] init];
++    desc.errorOptions = MTLCommandBufferErrorOptionEncoderExecutionStatus;
++    params->ret = (obj_handle_t)[(id<MTLCommandQueue>)params->handle commandBufferWithDescriptor:desc];
++    [desc release];
++    return STATUS_SUCCESS;
++  }
+   params->ret = (obj_handle_t)[(id<MTLCommandQueue>)params->handle commandBuffer];
+   return STATUS_SUCCESS;
+ }
+@@ -2227,7 +2246,33 @@
+ static NTSTATUS
+ _MTLCommandBuffer_error(void *obj) {
+   struct unixcall_generic_obj_obj_ret *params = obj;
+-  params->ret = (obj_handle_t)[(id<MTLCommandBuffer>)params->handle error];
++  id<MTLCommandBuffer> cmdbuf = (id<MTLCommandBuffer>)params->handle;
++  NSError *error = [cmdbuf error];
++  params->ret = (obj_handle_t)error;
++  /* Pawpad (DXMT_GPU_ERROR_DETAIL=1): log the encoders' states. Pass labels need DXMT_BENCH_LABELS=1. */
++  NSArray *infos = error ? error.userInfo[MTLCommandBufferEncoderInfoErrorKey] : nil;
++  if (![infos isKindOfClass:[NSArray class]])
++    return STATUS_SUCCESS;
++  static const char *const state_names[] = {"unknown", "completed", "affected", "pending", "faulted"};
++  unsigned counts[5] = {0}, pending_shown = 0;
++  const char *last_completed = "";
++  for (id<MTLCommandBufferEncoderInfo> info in infos) {
++    NSUInteger s = (NSUInteger)info.errorState;
++    counts[s < 5 ? s : 0]++;
++    if (s == MTLCommandEncoderErrorStateCompleted)
++      last_completed = info.label.UTF8String ?: "";
++  }
++  fprintf(stderr, "dxmt-gpu-error: command buffer failed (code %ld): %lu encoders, %u completed, %u affected, "
++          "%u faulted, %u pending, %u unknown; last completed: %s\n", (long)error.code,
++          (unsigned long)infos.count, counts[1], counts[2], counts[4], counts[3], counts[0], last_completed);
++  for (id<MTLCommandBufferEncoderInfo> info in infos) {
++    NSUInteger s = (NSUInteger)info.errorState;
++    if (s == MTLCommandEncoderErrorStateCompleted || (s == MTLCommandEncoderErrorStatePending && pending_shown++ >= 3))
++      continue;
++    NSString *signposts = info.debugSignposts.count ? [info.debugSignposts componentsJoinedByString:@" > "] : nil;
++    fprintf(stderr, "dxmt-gpu-error:   %-9s %s%s%s\n", s < 5 ? state_names[s] : "?", info.label.UTF8String ?: "",
++            signposts ? " | " : "", signposts ? signposts.UTF8String : "");
++  }
+   return STATUS_SUCCESS;
+ }
+ 

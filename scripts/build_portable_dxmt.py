@@ -170,6 +170,15 @@ def prepare_source(work,discard_changes=False):
     review=ROOT/'patches/dxmt-review-fixes.patch'
     if hashlib.sha256(review.read_bytes()).hexdigest()!='82c0b7494c7162d7fd44f7168402aff5e7745670791279c239c8b96d716c8e35':raise ValueError('Accepted review-fixes patch changed')
     use(review);pawpad['review-fixes']=review
+    # Pawpad: DXMT_RENAME_UAV_BUFFERS=1 renames GPU-writable buffers on a whole UpdateSubresource
+    # instead of copying through a blit encoder (off by default).
+    rename_uav=ROOT/'patches/dxmt-rename-uav-buffers.patch'
+    if hashlib.sha256(rename_uav.read_bytes()).hexdigest()!='b8205d52f0f3a79f7c1371ee0a17c0e6bae31a85a02d741a6c8385900a79e19a':raise ValueError('Accepted rename-UAV-buffers patch changed')
+    use(rename_uav);pawpad['rename-uav-buffers']=rename_uav
+    # Pawpad: DXMT_GPU_ERROR_DETAIL=1 logs each encoder's state when a command buffer fails (GPU hangs).
+    error_detail=ROOT/'patches/dxmt-gpu-error-detail.patch'
+    if hashlib.sha256(error_detail.read_bytes()).hexdigest()!='686834388dd03c0161420787efae596b1f9ae97d31deee45768b8d1930ee400d':raise ValueError('Accepted GPU-error-detail patch changed')
+    use(error_detail);pawpad['gpu-error-detail']=error_detail
     if not reuse:record.write_text(json.dumps({'patches':patch_identity(),'state':tree_state(source)},indent=2)+'\n')
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream,'pawpad':pawpad}
 

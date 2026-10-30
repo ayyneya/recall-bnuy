@@ -1,0 +1,101 @@
+diff --git a/src/d3d11/d3d11_buffer.cpp b/src/d3d11/d3d11_buffer.cpp
+--- a/src/d3d11/d3d11_buffer.cpp
++++ b/src/d3d11/d3d11_buffer.cpp
+@@ -22,6 +22,7 @@
+ #include "dxmt_dynamic.hpp"
+ #include "dxmt_format.hpp"
+ #include "d3d11_resource.hpp"
++#include "util_env.hpp"
+ 
+ namespace dxmt {
+ 
+@@ -122,9 +123,27 @@
+     allow_raw_view = pDesc->MiscFlags & D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+     if (!(desc.BindFlags & kD3D11OutputBindFlags)) {
+       dynamic_ = new DynamicBuffer(buffer_.ptr(), flags);
++    } else if (RenameUAVBuffers() && pDesc->Usage == D3D11_USAGE_DEFAULT &&
++               (desc.BindFlags & kD3D11OutputBindFlags) == D3D11_BIND_UNORDERED_ACCESS &&
++               !(pDesc->MiscFlags & ~(D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS | D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS |
++                                      D3D11_RESOURCE_MISC_BUFFER_STRUCTURED))) {
++      // Pawpad (DXMT_RENAME_UAV_BUFFERS=1): a whole-buffer UpdateSubresource of a GPU-writable buffer
++      // gets a fresh CPU-writable name, like Map(DISCARD), instead of a staging copy in a blit encoder
++      // that splits the compute work around it. New names are Managed (shader-writable views, CPU
++      // writes on unified memory); the GPU-private first allocation is never handed out as a name.
++      auto rename_flags = flags;
++      rename_flags.clr(BufferAllocationFlag::GpuPrivate);
++      rename_flags.set(BufferAllocationFlag::GpuManaged);
++      dynamic_ = new DynamicBuffer(buffer_.ptr(), rename_flags);
+     }
+   }
+ 
++  static bool
++  RenameUAVBuffers() {
++    static const bool enabled = env::getEnvVar("DXMT_RENAME_UAV_BUFFERS") == "1";
++    return enabled;
++  }
++
+   bool
+   allocationRefused() const {
+     return allocation_refused_;
+diff --git a/src/dxmt/dxmt_dynamic.cpp b/src/dxmt/dxmt_dynamic.cpp
+--- a/src/dxmt/dxmt_dynamic.cpp
++++ b/src/dxmt/dxmt_dynamic.cpp
+@@ -30,8 +30,13 @@
+     if (entry.will_free_at > coherent_seq_id) {
+       break;
+     }
+-    ret = std::move(entry.allocation);
+     fifo.pop();
++    // Pawpad: a GPU-writable buffer's first allocation is GPU-private (no CPU mapping); once renamed
++    // away it is dropped, not reused as a name the CPU writes into.
++    if (entry.allocation->flags().test(BufferAllocationFlag::GpuPrivate) &&
++        !flags_.test(BufferAllocationFlag::GpuPrivate))
++      continue;
++    ret = std::move(entry.allocation);
+     break;
+   }
+   if (!ret.ptr())
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1238,7 +1238,9 @@
+           Unmap(pDstResource, 0);
+           return;
+         }
+-        if (CopyFlags & D3D11_COPY_NO_OVERWRITE) {
++        // Pawpad: a GPU-writable buffer (DXMT_RENAME_UAV_BUFFERS) may still be on its GPU-private first
++        // allocation, and the GPU may write it: partial updates keep going through a blit.
++        if ((CopyFlags & D3D11_COPY_NO_OVERWRITE) && !(unused_bind_flag & D3D11_BIND_UNORDERED_ACCESS)) {
+           Map(pDstResource, 0, D3D11_MAP_WRITE_NO_OVERWRITE, 0, &mapped);
+           auto [allocation, sub] = GetDynamicBufferAllocation(dynamic);
+           allocation->updateContents(copy_offset, pSrcData, copy_len, sub);
+diff --git a/src/d3d11/d3d11_context_imm.cpp b/src/d3d11/d3d11_context_imm.cpp
+--- a/src/d3d11/d3d11_context_imm.cpp
++++ b/src/d3d11/d3d11_context_imm.cpp
+@@ -176,6 +176,11 @@
+             stage.SRVs.set_dirty();
+           }
+         }
++        // Pawpad: renamed GPU-writable buffers (DXMT_RENAME_UAV_BUFFERS; reached via UpdateSubresource)
++        if (bind_flag & D3D11_BIND_UNORDERED_ACCESS) {
++          state_.ComputeStageUAV.UAVs.set_dirty();
++          state_.OutputMerger.UAVs.set_dirty();
++        }
+ 
+         pMappedResource->pData = MapDynamicBuffer(dynamic, current_seq_id, coherent_seq_id);
+         if (unlikely(!pMappedResource->pData))
+diff --git a/src/d3d11/d3d11_context_def.cpp b/src/d3d11/d3d11_context_def.cpp
+--- a/src/d3d11/d3d11_context_def.cpp
++++ b/src/d3d11/d3d11_context_def.cpp
+@@ -177,6 +177,11 @@
+             stage.SRVs.set_dirty();
+           }
+         }
++        // Pawpad: renamed GPU-writable buffers (DXMT_RENAME_UAV_BUFFERS; reached via UpdateSubresource)
++        if (bind_flag & D3D11_BIND_UNORDERED_ACCESS) {
++          state_.ComputeStageUAV.UAVs.set_dirty();
++          state_.OutputMerger.UAVs.set_dirty();
++        }
+ 
+         pMappedResource->pData = MapDynamicBuffer(dynamic);
+         pMappedResource->RowPitch = buffer_length;
