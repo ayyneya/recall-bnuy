@@ -101,6 +101,25 @@ each checked against its SHA-256 in the script:
   view in another format is created, the texture's next bind moves it to an
   allocation with that usage, in stream order (the path the deferred
   ShaderWrite of `dxmt-v1-performance.patch` already uses).
+- `dxmt-review-fixes.patch`: fixes from the 30 Oct code review of the patches
+  above. Views DXMT makes itself in another format (ResolveSubresource and the
+  render+resolve merge, ClearView with rects, MetalFX's motion vectors) move a
+  deferred texture first; a view in another format of an allocation without
+  PixelFormatView is made when first used, not when queued commands touch the
+  allocation; multisample targets aren't deferred. Metal refusing an
+  allocation no longer leaves a resource without storage in use: a move or a
+  depth rename keeps the texture where it is, and `Map(WRITE_DISCARD)`,
+  CreateBuffer and texture creation fail with `E_OUTOFMEMORY`. The record
+  trigger starts one recording per file and switches itself off when the file
+  can't be deleted; `DXMT_PASS_TIMING` alone registers the shader tags; the
+  display query frees every ICC tag it reads.
+
+`build_portable_dxmt.py` resets its DXMT tree (`<workspace>/dxmt-source`) only
+when it holds nothing but what an earlier run put there
+(`<workspace>/dxmt-source.prepared.json`): edits or new files stop the build
+until they are exported to a patch, or `--discard-dxmt-changes` throws them
+away. A tree prepared from the same patches is reused as it is, so the build
+stays incremental.
 
 ## Wine
 
