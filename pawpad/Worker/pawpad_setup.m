@@ -153,14 +153,12 @@ static NSString *runtime(void) {
     return p;
 }
 static NSString *gameExecutable(void);
-/* Recall's environment (the contract: DXMT, msync, Rosetta's AVX, the precise input variant,
- * Recall's shader preparation and pipeline cache), with the per-program settings keyed to
- * Aniimo's game and the pipeline cache in Pawpad's own namespace. Never the player's HOME,
- * account state or caches. CX_HACK_FILESYSTEM_TYPE stays: without it Wine rebuilds ACLs from
- * Unix modes, which broke Battle.net's folder checks (REC-6). */
+#include "pawpad_profile.h"
+/* Aniimo's environment (pawpad_profile.h) plus the data folder's paths. Never the player's HOME,
+ * account state or caches. */
 static NSMutableDictionary *wineEnv(NSString *engine) {
-    NSMutableDictionary *env=[candidateEnvironment() mutableCopy];
     NSString *game=gameExecutable();
+    NSMutableDictionary *env=[aniimoEnvironment(game) mutableCopy];
     [env addEntriesFromDictionary:@{@"PATH":@"/usr/bin:/bin:/usr/sbin:/sbin",@"HOME":join(root,@"home"),@"USER":@"player",
         @"TMPDIR":join(root,@"tmp"),@"WINEPREFIX":join(root,@"environment"),@"WINEARCH":@"win64",
         @"WINESERVER":join(engine,@"bin/wineserver"),@"WINELOADER":join(engine,@"bin/wine"),
@@ -168,8 +166,7 @@ static NSMutableDictionary *wineEnv(NSString *engine) {
         @"CX_APPLEGPTK_LIBD3DSHARED_PATH":join(engine,@"lib/external/libd3dshared.dylib"),
         @"DXMT_SHADER_CACHE_PATH":join(root,@"cache/shaders"),@"DXMT_LOG_LEVEL":@"error",@"DXMT_LOG_PATH":@"none",
         @"DXMT_CONFIG_FILE":[@"Z:" stringByAppendingString:[([fm fileExistsAtPath:join(root,@"dxmt.conf")]?join(root,@"dxmt.conf"):join(engine,@"config/dxmt.conf")) stringByReplacingOccurrencesOfString:@"/" withString:@"\\"]],
-        @"DXMT_PIPELINE_CACHE_PATH":join(root,@"cache/pipelines"),@"DXMT_PIPELINE_CACHE_NAMESPACE":@"aniimo-v1",
-        @"WINEMAC_MOUSELOOK":game,@"WINE_GAME_MODE":game}];
+        @"DXMT_PIPELINE_CACHE_PATH":join(root,@"cache/pipelines")}];
     return env;
 }
 // DIRECTORY is the working directory (the data folder unless given): Wine names it the
@@ -491,9 +488,7 @@ static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, N
     }
     if(displaysChanged)endSession(engine);
     configureRetinaMode(engine);
-    NSString *config=[NSString stringWithContentsOfFile:join(engine,@"config/dxmt.conf") encoding:NSUTF8StringEncoding error:nil];
-    if(!config)fail(@"runtime_missing");
-    if(![rendererProfile(config) writeToFile:join(root,@"dxmt.conf") atomically:YES encoding:NSUTF8StringEncoding error:nil])fail(@"settings_write_failed");
+    if(![aniimoRendererProfile(gameExecutable()) writeToFile:join(root,@"dxmt.conf") atomically:YES encoding:NSUTF8StringEncoding error:nil])fail(@"settings_write_failed");
     event(@"display",@{@"retina_mode":@(retinaModeOn()),@"game":gameExecutable()});
     // Setup applies these; a launch puts back any that went missing.
     configureProxy(engine,proxyDetectionChosen());
@@ -510,7 +505,7 @@ static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, N
     if(recording)env[@"WINEDEBUG"]=@"-all,err+all,+timestamp,+pid";
     [env addEntriesFromDictionary:logs];
     NSMutableDictionary *record=[@{@"logging":logs.count ? logging : @"off",@"winedebug":env[@"WINEDEBUG"],@"dxmt_log_level":env[@"DXMT_LOG_LEVEL"],
-        @"runtime":state()[@"active_runtime"],@"game":gameExecutable(),@"metal_hud":@(hud),@"metal_validation":@(validation),@"app_shell":@(shell),@"retina_mode":@(retinaModeOn()),
+        @"runtime":state()[@"active_runtime"],@"game":gameExecutable(),@"metal_hud":@(hud),@"metal_validation":@(validation),@"app_shell":@(shell),@"profile":pawpadProfileVersion,@"retina_mode":@(retinaModeOn()),
         @"recording":@(recording)} mutableCopy];
     if([logging isEqual:@"custom"])record[@"logging_custom"]=loggingCustom;
     NSDictionary *extra=extraEnvironment(extraSpec);
