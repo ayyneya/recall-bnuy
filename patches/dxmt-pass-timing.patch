@@ -1,3 +1,14 @@
+--- a/src/d3d11/d3d11_pipeline.cpp
++++ b/src/d3d11/d3d11_pipeline.cpp
+@@ -209,6 +209,8 @@
+     }
+ 
+     TRACE("Compiled 1 PSO");
++    if (bench_labels_enabled())
++      bench_register_pipeline(state_.handle, "cs" + shader_sha1_.substr(0, 6));
+ 
+     return this;
+   }
 --- a/src/dxmt/dxmt_occlusion_query.hpp
 +++ b/src/dxmt/dxmt_occlusion_query.hpp
 @@ -7,6 +7,7 @@
@@ -84,22 +95,23 @@
  #include "Metal.hpp"
  #include "dxmt_command_queue.hpp"
  #include "dxmt_deptrack.hpp"
-@@ -946,14 +947,69 @@
+@@ -945,15 +946,70 @@
+   }
    return label;
  }
- 
++
 +// the labels of the command buffer being timed (DXMT_PASS_TIMING); flushCommands runs on the
 +// encode thread only
 +thread_local std::vector<std::string> *bench_label_sink = nullptr;
-+
+ 
  template <typename Encoder>
  void
  bench_label(Encoder &encoder, const std::string &text) {
    encoder.setLabel(WMT::String::string(text.c_str(), WMTUTF8StringEncoding));
 +  if (bench_label_sink && !bench_label_sink->empty())
 +    bench_label_sink->back() = text;
- }
- 
++}
++
 +const char *
 +pass_timing_kind(EncoderType type) {
 +  switch (type) {
@@ -122,8 +134,8 @@
 +  default:
 +    return nullptr;
 +  }
-+}
-+
+ }
+ 
 +std::mutex pass_timing_mutex;
 +FILE *pass_timing_file = nullptr;
 +
@@ -154,10 +166,11 @@
  void
  bench_register_pipeline(obj_handle_t pso, const std::string &tag) {
    std::lock_guard<std::mutex> lock(bench_pipeline_mutex);
-@@ -1005,8 +1061,40 @@
+@@ -1004,9 +1060,41 @@
+   std::erase_if(pending_queries_, [=](auto &query) -> bool { return query->queryEndAt() == seqId; });
  
    readbacks.timestamp = timestamp_state_.flush(cmdbuf);
- 
++
 +  if (pass_timing && encoder_count)
 +    readbacks.pass_timing = std::make_unique<PassTimingReadback>(
 +        device_, cmdbuf, bench_label_frame, seqId, std::min(encoder_count + 1, PassTimingReadback::kMaxSamples)
@@ -186,7 +199,7 @@
 +    timing->labels_.push_back(kind);
 +  };
 +  bench_label_sink = readbacks.pass_timing ? &readbacks.pass_timing->labels_ : nullptr;
-+
+ 
    while (encoder_index) {
      auto current = encoders[encoder_count - encoder_index];
 +    if (readbacks.pass_timing)
@@ -195,7 +208,32 @@
      switch (current->type) {
      case EncoderType::Render: {
        auto data = static_cast<RenderEncoderData *>(current);
-@@ -1383,6 +1471,9 @@
+@@ -1166,7 +1254,23 @@
+                       bench_count(&data->cmd_head, [](uint16_t type) {
+                         return type == WMTComputeCommandDispatch || type == WMTComputeCommandDispatchIndirect;
+                       }));
+-        bench_label(encoder, buf);
++        std::string label = buf;
++        // the shaders of the encoder's first few pipelines
++        std::vector<obj_handle_t> seen;
++        for (auto cmd = (const wmtcmd_base *)((const wmtcmd_base *)&data->cmd_head)->next.ptr; cmd && seen.size() < 4;
++             cmd = (const wmtcmd_base *)cmd->next.ptr) {
++          if (cmd->type != WMTComputeCommandSetPSO)
++            continue;
++          auto pso = ((const wmtcmd_compute_setpso *)cmd)->pso;
++          if (std::find(seen.begin(), seen.end(), pso) != seen.end())
++            continue;
++          seen.push_back(pso);
++          std::lock_guard<std::mutex> lock(bench_pipeline_mutex);
++          auto found = bench_pipeline_tags.find(pso);
++          label += seen.size() == 1 ? " p:" : ",";
++          label += found != bench_pipeline_tags.end() ? found->second : std::string("?");
++        }
++        bench_label(encoder, label);
+       }
+       data->fence_wait.forEach([&](auto id) { encoder.waitForFence(fence_pool_[id]); });
+       struct wmtcmd_compute_setbuffer setcmd;
+@@ -1383,6 +1487,9 @@
      }
      encoder_index--;
    }
