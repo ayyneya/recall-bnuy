@@ -199,7 +199,10 @@ static BOOL windowOnScreen(pid_t pid) {
     CFArrayRef list=CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements,kCGNullWindowID);
     BOOL found=NO;
     for(NSDictionary *window in (__bridge NSArray *)list) {
-        if([window[(id)kCGWindowOwnerPID] intValue]!=pid || [window[(id)kCGWindowLayer] intValue]!=0)continue;
+        // Any window level: the layer-0 test missed the game's window (every row "hidden" while 7,060
+        // frames were presented, 24 Oct); a full-screen Wine window can sit above the normal level.
+        // Only the size rules out the game's small helper windows.
+        if([window[(id)kCGWindowOwnerPID] intValue]!=pid)continue;
         NSDictionary *bounds=window[(id)kCGWindowBounds];
         if([bounds[@"Width"] doubleValue]>=320 && [bounds[@"Height"] doubleValue]>=240) {found=YES;break;}
     }
