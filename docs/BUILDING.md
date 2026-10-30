@@ -24,7 +24,8 @@ reference.
 Initialize DXMT at its exact commit and initialize the pinned DirectX and NVAPI
 headers submodules. Apply, once each and in this order, `patches/dxmt-v1-private.patch`,
 `patches/dxmt-v1-performance.patch`, `patches/dxmt-portable-metal.patch`,
-`patches/dxmt-metalfx-upscaling.patch` and `patches/dxmt-shader-pack.patch`.
+`patches/dxmt-metalfx-upscaling.patch` and `patches/dxmt-shader-pack.patch`; Pawpad's build then
+applies its own DXMT patches in the order `patches/README.md` lists under "Pawpad (Aniimo)".
 Extract the Wine source and apply, once each and in this order,
 `patches/wine-v1-canvas.patch`, `patches/wine-mouselook.patch`,
 `patches/wine-portable-directory-boolean.patch`, Soju's
