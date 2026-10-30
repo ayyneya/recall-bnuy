@@ -1,0 +1,168 @@
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index 4ff4656..2c42324 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1322,6 +1322,8 @@ public:
+     EmitOP([Primitive, StartVertexLocation, VertexCount](ArgumentEncodingContext& enc) {
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.render_pso_missing)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw>();
+       cmd.type = WMTRenderCommandDraw;
+       cmd.primitive_type = Primitive;
+@@ -1361,6 +1363,8 @@ public:
+       enc.bumpVisibilityResultOffset();
+       auto [index_buffer, index_sub_offset] = enc.currentIndexBuffer();
+       enc.resolveRenderPassBarrier();
++      if (enc.render_pso_missing)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw_indexed>();
+       cmd.type = WMTRenderCommandDrawIndexed;
+       cmd.primitive_type = Primitive;
+@@ -1401,6 +1405,8 @@ public:
+           StartInstanceLocation](ArgumentEncodingContext &enc) {
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.render_pso_missing)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw>();
+       cmd.type = WMTRenderCommandDraw;
+       cmd.primitive_type = Primitive;
+@@ -1449,6 +1455,8 @@ public:
+       enc.bumpVisibilityResultOffset();
+       auto [index_buffer, index_sub_offset] = enc.currentIndexBuffer();
+       enc.resolveRenderPassBarrier();
++      if (enc.render_pso_missing)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw_indexed>();
+       cmd.type = WMTRenderCommandDrawIndexed;
+       cmd.primitive_type = Primitive;
+@@ -1491,6 +1499,8 @@ public:
+ 
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.render_pso_missing)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_tessellation_mesh_draw>();
+       cmd.type = WMTRenderCommandDXMTTessellationMeshDraw;
+       cmd.draw_arguments_offset = enc.getFinalArgumentBufferOffset(draw_arguments_offset);
+@@ -1533,6 +1543,8 @@ public:
+       auto [index_buffer, index_sub_offset] = enc.currentIndexBuffer();
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.render_pso_missing)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_tessellation_mesh_draw_indexed>();
+       cmd.type = WMTRenderCommandDXMTTessellationMeshDrawIndexed;
+       cmd.draw_arguments_offset = enc.getFinalArgumentBufferOffset(draw_arguments_offset);
+@@ -1569,6 +1581,8 @@ public:
+ 
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.render_pso_missing)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_geometry_draw>();
+       cmd.type = WMTRenderCommandDXMTGeometryDraw;
+       cmd.draw_arguments_offset = enc.getFinalArgumentBufferOffset(draw_arguments_offset);
+@@ -1605,6 +1619,8 @@ public:
+ 
+       enc.bumpVisibilityResultOffset();
+       enc.resolveRenderPassBarrier();
++      if (enc.render_pso_missing)
++        return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_geometry_draw_indexed>();
+       cmd.type = WMTRenderCommandDXMTGeometryDrawIndexed;
+       cmd.draw_arguments_offset = enc.getFinalArgumentBufferOffset(draw_arguments_offset);
+@@ -1646,6 +1662,8 @@ public:
+         enc.bumpVisibilityResultOffset();
+         auto [index_buffer, index_sub_offset] = enc.currentIndexBuffer();
+         enc.resolveRenderPassBarrier();
++        if (enc.render_pso_missing)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw_indexed_indirect>();
+         cmd.type = WMTRenderCommandDrawIndexedIndirect;
+         cmd.primitive_type = Primitive;
+@@ -1683,6 +1701,8 @@ public:
+         );
+         enc.bumpVisibilityResultOffset();
+         enc.resolveRenderPassBarrier();
++        if (enc.render_pso_missing)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_draw_indirect>();
+         cmd.type = WMTRenderCommandDrawIndirect;
+         cmd.primitive_type = Primitive;
+@@ -1712,6 +1732,8 @@ public:
+           dispatch_arg.gpu_buffer, dispatch_arg.gpu_address, dispatch_arg.offset, max_object_threadgroups
+         );
+         enc.resolveRenderPassBarrier();
++        if (enc.render_pso_missing)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_geometry_draw_indirect>();
+         cmd.type = WMTRenderCommandDXMTGeometryDrawIndirect;
+         cmd.dispatch_args_buffer = dispatch_arg.gpu_buffer;
+@@ -1747,6 +1769,8 @@ public:
+           dispatch_arg.gpu_buffer, dispatch_arg.gpu_address, dispatch_arg.offset, max_object_threadgroups
+         );
+         enc.resolveRenderPassBarrier();
++        if (enc.render_pso_missing)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_geometry_draw_indexed_indirect>();
+         cmd.type = WMTRenderCommandDXMTGeometryDrawIndexedIndirect;
+         cmd.dispatch_args_buffer = dispatch_arg.gpu_buffer;
+@@ -1783,6 +1807,8 @@ public:
+             dispatch_arg.gpu_buffer, dispatch_arg.gpu_address,
+             dispatch_arg.offset, max_object_threadgroups);
+         enc.resolveRenderPassBarrier();
++        if (enc.render_pso_missing)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_tessellation_mesh_draw_indirect>();
+         cmd.type = WMTRenderCommandDXMTTessellationMeshDrawIndirect;
+         cmd.dispatch_args_buffer = dispatch_arg.gpu_buffer;
+@@ -1821,6 +1847,8 @@ public:
+             dispatch_arg.gpu_buffer, dispatch_arg.gpu_address,
+             dispatch_arg.offset, max_object_threadgroups);
+         enc.resolveRenderPassBarrier();
++        if (enc.render_pso_missing)
++          return;
+         auto &cmd = enc.encodeRenderCommand<wmtcmd_render_dxmt_tessellation_mesh_draw_indexed_indirect>();
+         cmd.type = WMTRenderCommandDXMTTessellationMeshDrawIndexedIndirect;
+         cmd.dispatch_args_buffer = dispatch_arg.gpu_buffer;
+@@ -4795,6 +4823,7 @@ public:
+       render_encoder->use_tessellation = 1;
+       MTL_COMPILED_TESSELLATION_MESH_PIPELINE GraphicsPipeline{};
+       pso->GetPipeline(&GraphicsPipeline); // may block
++      enc.render_pso_missing = !GraphicsPipeline.PipelineState;
+       enc.tess_num_output_control_point_element = GraphicsPipeline.NumControlPointOutputElement;
+       enc.tess_threads_per_patch = GraphicsPipeline.ThreadsPerPatch;
+       if (!GraphicsPipeline.PipelineState)
+@@ -4843,6 +4872,7 @@ public:
+       render_encoder->use_geometry = 1;
+       MTL_COMPILED_GRAPHICS_PIPELINE GraphicsPipeline{};
+       pso->GetPipeline(&GraphicsPipeline); // may block
++      enc.render_pso_missing = !GraphicsPipeline.PipelineState;
+       if (!GraphicsPipeline.PipelineState)
+         return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_setpso>();
+@@ -4899,6 +4929,7 @@ public:
+     EmitST([pso = std::move(pipeline)](ArgumentEncodingContext& enc) {
+       MTL_COMPILED_GRAPHICS_PIPELINE GraphicsPipeline{};
+       pso->GetPipeline(&GraphicsPipeline); // may block
++      enc.render_pso_missing = !GraphicsPipeline.PipelineState;
+       if (!GraphicsPipeline.PipelineState)
+         return;
+       auto &cmd = enc.encodeRenderCommand<wmtcmd_render_setpso>();
+diff --git a/src/dxmt/dxmt_context.hpp b/src/dxmt/dxmt_context.hpp
+index d126b57..1d14654 100644
+--- a/src/dxmt/dxmt_context.hpp
++++ b/src/dxmt/dxmt_context.hpp
+@@ -838,6 +838,9 @@ public:
+   // skipped, as Direct3D drivers do, instead of reaching the GPU without a pipeline, which
+   // crashed Apple's driver with a division by zero (Aniimo, M2 Pro).
+   bool compute_pso_missing = false;
++  // Pawpad: the bound render pipeline failed to build; its draws are skipped instead of
++  // running with the previous pipeline (wrong shaders on this draw's bindings).
++  bool render_pso_missing = false;
+ 
+   // DXMT_BENCH_LABELS=1: every encoder is labeled with its frame, its index in that
+   // frame, its attachments and its command count, for GPU traces of the replayer.
