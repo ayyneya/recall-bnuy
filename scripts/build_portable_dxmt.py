@@ -92,6 +92,11 @@ def prepare_source(work):
     refused=ROOT/'patches/dxmt-log-refused-allocations.patch'
     if hashlib.sha256(refused.read_bytes()).hexdigest()!='f791eba1c721b0a501ed545ba6418314a1c94dce54ef9ea861e780492b5b7492':raise ValueError('Accepted refused-allocation patch changed')
     run('git','apply',refused,cwd=source);upstream['log-refused-allocations']=refused
+    # Pawpad: draws whose render pipeline Metal refused are skipped, as dispatches already are
+    # (dxmt-skip-failed-compute); they used to run with the previously bound pipeline.
+    render_skip=ROOT/'patches/dxmt-skip-failed-render.patch'
+    if hashlib.sha256(render_skip.read_bytes()).hexdigest()!='20053fa0cad13ca5d7f52ad5741e002c8071f60547d1864a7a24466c39913ebc':raise ValueError('Accepted failed-render patch changed')
+    run('git','apply',render_skip,cwd=source);upstream['skip-failed-render']=render_skip
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream}
 
 
