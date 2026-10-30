@@ -33,19 +33,4 @@ static void configureRetinaMode(NSString *engine) {
     if(!registrySaved(engine,60))fail(@"environment_initialization_busy");
     event(@"retina_mode",@{@"on":@(wanted)});
 }
-/* The renderer profile for Aniimo: the engine's tuned profile (written for Overwatch.exe) for
- * the game's own program name, without the fullscreen canvas (dxgi.fullscreenCanvas*,
- * nativeFullscreen, sharpPresentation), which forced Overwatch's size and drawing onto the screen.
- * Shader compilation, frame latency and pacing stay as Recall tuned them. */
-static NSString *rendererProfile(NSString *profile) {
-    NSMutableArray *lines=[NSMutableArray array];BOOL section=NO;
-    for(NSString *line in [profile componentsSeparatedByString:@"\n"]) {
-        NSString *trimmed=[line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-        if([trimmed hasPrefix:@"["] && [trimmed hasSuffix:@"]"]) {[lines addObject:[NSString stringWithFormat:@"[%@]",gameExecutable()]];section=YES;continue;}
-        NSString *key=[[line componentsSeparatedByString:@"="][0] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-        if([key hasPrefix:@"dxgi.fullscreenCanvas"] || [key isEqual:@"dxgi.nativeFullscreen"] || [key isEqual:@"dxgi.sharpPresentation"])continue;
-        [lines addObject:line];
-    }
-    if(!section)fail(@"runtime_missing");
-    return [lines componentsJoinedByString:@"\n"];
-}
+// The renderer profile is in pawpad_profile.h.
