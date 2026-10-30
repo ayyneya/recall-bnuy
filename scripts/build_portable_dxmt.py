@@ -195,6 +195,11 @@ def prepare_source(work,discard_changes=False):
     stall=ROOT/'patches/dxmt-gpu-stall-recovery.patch'
     if hashlib.sha256(stall.read_bytes()).hexdigest()!='b9080bddefa3895dd6e0125c00f522ec0ceadecd1fdc33eaefa6267240790ce4':raise ValueError('Accepted GPU-stall recovery patch changed')
     use(stall);pawpad['gpu-stall-recovery']=stall
+    # Pawpad: the stall watch waits in 100 ms slices and stops once a buffer has ended: a failed or
+    # ignored buffer never signals, and a single 2 s wait cost every such frame 2 s.
+    stall_slices=ROOT/'patches/dxmt-gpu-stall-watch-slices.patch'
+    if hashlib.sha256(stall_slices.read_bytes()).hexdigest()!='1d48272269c85f0d4691d1a38d1b2adb2a9bdf35f6a47cbfc3f3d1851f3d4e69':raise ValueError('Accepted stall-watch slices patch changed')
+    use(stall_slices);pawpad['gpu-stall-watch-slices']=stall_slices
     if not reuse:record.write_text(json.dumps({'patches':patch_identity(),'state':tree_state(source)},indent=2)+'\n')
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream,'pawpad':pawpad}
 

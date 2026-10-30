@@ -1,0 +1,24 @@
+diff --git a/src/dxmt/dxmt_command_queue.cpp b/src/dxmt/dxmt_command_queue.cpp
+--- a/src/dxmt/dxmt_command_queue.cpp
++++ b/src/dxmt/dxmt_command_queue.cpp
+@@ -240,8 +240,18 @@
+     auto &chunk = chunks[internal_seq % kCommandChunkCount];
+     if (chunk.attached_cmdbuf.status() <= WMTCommandBufferStatusScheduled) {
+       auto start = frame_trace_ ? FrameTelemetry::stamp() : FrameTelemetry::Stamp{};
+-      // Every chunk's buffer ends by signaling its event id (ArgumentEncodingContext::flushCommands).
+-      bool stalled = stall_watch_ && !event.waitUntilSignaledValue(chunk.chunk_event_id, 2000);
++      // Every chunk's buffer ends by signaling its event id (ArgumentEncodingContext::flushCommands),
++      // unless it fails: a failed or ignored buffer never signals, so the wait goes in 100 ms slices
++      // and stops once the buffer has ended either way.
++      bool stalled = false;
++      for (unsigned waited_ms = 0; stall_watch_ && !event.waitUntilSignaledValue(chunk.chunk_event_id, 100);) {
++        if (chunk.attached_cmdbuf.status() > WMTCommandBufferStatusScheduled)
++          break;
++        if ((waited_ms += 100) >= 2000) {
++          stalled = true;
++          break;
++        }
++      }
+       auto stall_start = clock::now();
+       if (stalled)
+         ReportStall(chunk, "unfinished", 2000);
