@@ -133,6 +133,15 @@ each checked against its SHA-256 in the script:
   that way; the stand-in's evaluation failed at its first `Get` without a word,
   so Aniimo (DLSS through Streamline) showed a black world. A failed evaluation
   now names the input it lacked, once.
+- `dxmt-gpu-stall-recovery.patch`: every command buffer's start waits for the
+  resource uploads it needs (an event the upload queue signals). A GPU reset
+  discards the upload buffers in flight with their signals, and the next chunks
+  waited for those values until the next reset: Aniimo's 10-second freezes came
+  in chains. After a device error the lost values are signaled from the CPU
+  once the upload queue has settled. With `DXMT_GPU_ERROR_DETAIL=1` a command
+  buffer still unfinished 2 s in is reported while stuck and when it ends: the
+  upload value its start waits for, where the upload event is, and the newest
+  upload.
 
 `build_portable_dxmt.py` resets its DXMT tree (`<workspace>/dxmt-source`) only
 when it holds nothing but what an earlier run put there
