@@ -1,5 +1,5 @@
 /* Which processes are Pawpad's: their Windows name from ps, their engine from the kernel; no
- * command lines or environments. The game is the program found beside UnityPlayer.dll (gamePath); the launcher is
+ * command lines or environments (a Wine program's arguments can carry the launcher's login data). The game is the program found beside UnityPlayer.dll (gamePath); the launcher is
  * any other program in the launcher's folder (Electron runs several copies of itself). Only
  * paths already kept in state.json are used here: the monitor runs without setup.lock and
  * never writes them. */
@@ -29,7 +29,26 @@ static NSArray *sessionProcesses(void) {
     // The game's and launcher's paths, read once per call (state.json used to be read twice for
     // every line ps printed).
     NSString *game=keptProgram(@"game_path"),*launcher=keptProgram(@"launcher_path");
-    NSString *table=capture(@"/bin/ps",@[@"-axo",@"pid=,lstart=,comm="]);
+    // Only Pawpad's own Wine processes go to ps: the kernel gives every process's executable path
+    // (no arguments), and ps then reads just those processes' names. ps over every process on the
+    // Mac took ~250 ms each time, every 2 s while recording.
+    int capacity=proc_listallpids(NULL,0)+64;if(capacity<64)capacity=4096;
+    pid_t *pids=calloc((size_t)capacity,sizeof(pid_t));
+    int count=pids ? proc_listallpids(pids,capacity*(int)sizeof(pid_t)) : -1;
+    NSMutableArray *candidates=[NSMutableArray array];
+    for(int i=0;i<count;i++) {
+        char executable[PROC_PIDPATHINFO_MAXSIZE];
+        if(pids[i]<=0 || proc_pidpath(pids[i],executable,sizeof(executable))<=0)continue;
+        NSString *path=@(executable);
+        // Wine's loader is the executable of every Wine process: a prefix test is enough here; the
+        // resolved path is checked again below.
+        if([path hasPrefix:engine] || [path hasPrefix:shells] || [path containsString:@"/lib/wine/"] || [path containsString:@"/app-shell/"])
+            [candidates addObject:[NSString stringWithFormat:@"%d",pids[i]]];
+    }
+    free(pids);
+    if(count<0)fail(@"session_check_failed");
+    if(!candidates.count)return @[];
+    NSString *table=capture(@"/bin/ps",@[@"-o",@"pid=,lstart=,comm=",@"-p",[candidates componentsJoinedByString:@","]]);
     if(!table)fail(@"session_check_failed");
     NSRegularExpression *rx=[NSRegularExpression regularExpressionWithPattern:@"^\\s*(\\d+)\\s+(\\S+\\s+\\S+\\s+\\d+\\s+\\S+\\s+\\d+)\\s+(.+)$" options:0 error:nil];
     NSMutableArray *found=[NSMutableArray array];
