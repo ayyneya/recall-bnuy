@@ -65,6 +65,43 @@ Apple's MetalFX temporal upscaler.
 with `scripts/sign_pe.py`: NVIDIA's loader, part of the game, loads only a
 signed core DLL.
 
+### Pawpad (Aniimo)
+
+`build_portable_dxmt.py` applies these after the patches above, in this order,
+each checked against its SHA-256 in the script:
+
+- `dxmt-skip-failed-compute.patch`: dispatches of a compute pipeline Metal
+  refused are skipped (Apple's driver otherwise divides by zero and the game
+  freezes at 100% loading), and the refusal is logged.
+- `dxmt-record-trigger.patch`: the call recorder starts when the file named by
+  `DXMT_RECORD_TRIGGER` appears (checked every 30 presents, then deleted).
+- `dxmt-upstream-airconv.patch`: upstream 3Shain/dxmt d1c926c, ae91269, 9839e55
+  and 64ee6f5. d1c926c fixes the invalid IR for a vector `firstbit_shi` that made
+  Metal refuse Aniimo's shader 32f49794 ("Failed to materializeAll").
+  AIRCONV_VERSION becomes 124, so shaders translate again once.
+- `dxmt-upstream-display-leaks.patch`: upstream d815f7f and a741a3f (a display
+  query per Present leaked memory on macOS 27).
+- `dxmt-upstream-texture-fixes.patch`: upstream e40c9d7 (copies between texture
+  types were dropped) and f9beaea.
+- `dxmt-log-refused-allocations.patch`: an error line, rate-limited, when Metal
+  refuses a buffer or texture (a refused texture samples as black or clear).
+- `dxmt-skip-failed-render.patch`: draws of a render pipeline Metal refused are
+  skipped instead of running with the previous pipeline.
+- `dxmt-depth-rename-cap.patch`: `DXMT_DEPTH_RENAME_CAP` (default 32) caps the
+  copies a depth texture gets from full clears in one command buffer, and logs
+  when they pile up.
+- `dxmt-pass-timing.patch`: a diagnostic, off unless `DXMT_PASS_TIMING=<file>`
+  is set: a GPU timestamp before every encoder, labelled with the pass and its
+  shaders (`DXMT_PASS_TIMING_BARRIER=1` keeps the GPU from reordering them).
+- `dxmt-frame-log-segments.patch`: the frame log keeps 3 x 8 MB instead of
+  3 x 2 MB, about 80 minutes of frames at 45 FPS.
+- `dxmt-defer-pixel-format-view.patch` (`DXMT_DEFER_PIXEL_FORMAT_VIEW=1`, set by
+  Pawpad's Aniimo profile): typeless 2D colour render targets start without
+  PixelFormatView, which on Apple GPUs turns off lossless compression. When a
+  view in another format is created, the texture's next bind moves it to an
+  allocation with that usage, in stream order (the path the deferred
+  ShaderWrite of `dxmt-v1-performance.patch` already uses).
+
 ## Wine
 
 These apply to the `sources/wine` subtree of the
