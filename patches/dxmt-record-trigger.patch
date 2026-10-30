@@ -1,0 +1,42 @@
+diff --git a/src/d3d11/d3d11_recorder.cpp b/src/d3d11/d3d11_recorder.cpp
+index 27902ba..0a2533f 100644
+--- a/src/d3d11/d3d11_recorder.cpp
++++ b/src/d3d11/d3d11_recorder.cpp
+@@ -550,6 +550,7 @@ Recorder::Recorder() {
+     session_dir_.pop_back();
+   frames_per_recording_ = std::max<uint64_t>(1, env_u64("DXMT_RECORD_FRAMES", 1800));
+   start_frame_ = env_u64("DXMT_RECORD_START_FRAME", 0);
++  trigger_path_ = widen(env::getEnvVar("DXMT_RECORD_TRIGGER"));
+   checkpoint_interval_ = std::max<uint64_t>(1, env_u64("DXMT_RECORD_CHECKPOINT", 60));
+   max_blob_bytes_ = env_u64("DXMT_RECORD_MAX_GB", 24) << 30;
+   make_dirs(session_dir_);
+@@ -2226,7 +2227,14 @@ Recorder::OnPresent(RecordingDevice *device, ID3D11Texture2D *backbuffer, UINT s
+       write_status("recording");
+     return;
+   }
+-  if (state_ == State::Idle && (pressed || (start_frame_ && present_count_ == start_frame_))) {
++  // The trigger file is looked for every 30 frames: one GetFileAttributesW, not per frame.
++  bool triggered = false;
++  if (state_ == State::Idle && !trigger_path_.empty() && present_count_ % 30 == 0 &&
++      GetFileAttributesW(trigger_path_.c_str()) != INVALID_FILE_ATTRIBUTES) {
++    DeleteFileW(trigger_path_.c_str());
++    triggered = true;
++  }
++  if (state_ == State::Idle && (pressed || triggered || (start_frame_ && present_count_ == start_frame_))) {
+     state_ = State::Armed;
+     write_status("armed");
+   }
+diff --git a/src/d3d11/d3d11_recorder.hpp b/src/d3d11/d3d11_recorder.hpp
+index 96a3090..907b4b1 100644
+--- a/src/d3d11/d3d11_recorder.hpp
++++ b/src/d3d11/d3d11_recorder.hpp
+@@ -274,6 +274,9 @@ private:
+   uint32_t recording_index_ = 0;
+   uint64_t frames_per_recording_ = 1800;
+   uint64_t start_frame_ = 0;
++  // DXMT_RECORD_TRIGGER: a Windows path; a recording starts when that file appears (it is
++  // deleted, so it starts one recording). Lets a tool start one without keys in the game.
++  std::wstring trigger_path_;
+   uint64_t checkpoint_interval_ = 60;
+   uint64_t max_blob_bytes_ = 24ull << 30;
+   uint64_t present_count_ = 0;

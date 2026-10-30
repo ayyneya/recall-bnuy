@@ -27,8 +27,11 @@ def prepare_source(work):
     build needs (build_native_app.py --workspace WORK): its pipeline sources come from here."""
     source=work/'dxmt-source'
     if not source.exists():run('git','clone','--no-checkout','https://github.com/NerRobDog/dxmt',source)
-    current=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True).strip()
-    if current!=BASE:run('git','-C',source,'checkout','--detach',BASE)
+    # Every build starts from the pinned commit with nothing applied: the patches stack, so a tree
+    # left patched by an earlier build can't be checked patch by patch (a later patch changes the
+    # lines an earlier one is checked against).
+    run('git','-C',source,'checkout','--force','--detach',BASE)
+    run('git','-C',source,'clean','-fdq')
     run('git','-C',source,'submodule','update','--init','--recursive')
     current=subprocess.check_output(['git','-C',str(source/'include/native/directx'),'rev-parse','HEAD'],text=True).strip()
     if current!=HEADERS:raise ValueError('DirectX header identity mismatch')
@@ -36,19 +39,13 @@ def prepare_source(work):
     if current!=NVAPI:raise ValueError('NVAPI header identity mismatch')
     patch=ROOT/'patches/dxmt-v1-private.patch'
     if hashlib.sha256(patch.read_bytes()).hexdigest()!='5afcbde9512381c37e975450d08f7fd3cef1e8755739f1f5b4ae8f1563de5199':raise ValueError('Accepted renderer patch changed')
-    check=subprocess.run(['git','apply','--check',str(patch)],cwd=source,capture_output=True)
-    if check.returncode==0:run('git','apply',patch,cwd=source)
-    else:run('git','apply','--reverse','--check',patch,cwd=source)
+    run('git','apply',patch,cwd=source)
     # v1.0: the play-tested performance work (DXMT replay branch e873a90) on top.
     performance=ROOT/'patches/dxmt-v1-performance.patch'
     if hashlib.sha256(performance.read_bytes()).hexdigest()!='b119feb670a3e2ffe656159118e99a75abc5b9a8097e77096c512a01b81861f2':raise ValueError('Accepted performance patch changed')
-    check=subprocess.run(['git','apply','--check',str(performance)],cwd=source,capture_output=True)
-    if check.returncode==0:run('git','apply',performance,cwd=source)
-    else:run('git','apply','--reverse','--check',performance,cwd=source)
+    run('git','apply',performance,cwd=source)
     portable_patch=ROOT/'patches/dxmt-portable-metal.patch'
-    check=subprocess.run(['git','apply','--check',str(portable_patch)],cwd=source,capture_output=True)
-    if check.returncode==0:run('git','apply',portable_patch,cwd=source)
-    else:run('git','apply','--reverse','--check',portable_patch,cwd=source)
+    run('git','apply',portable_patch,cwd=source)
     # 1.3: DLSS on MetalFX. Direct3D 12 entry points and NVIDIA's failure codes in the DLSS
     # stand-in, and a d3d12.dll whose device only answers NVIDIA Streamline's setup questions.
     # MetalFX writes the DLSS output with shader-write usage (the 1.2 compression keeps it from
@@ -58,25 +55,24 @@ def prepare_source(work):
     # Sharpening setting) is a contrast-adaptive pass, also compiled at run time.
     metalfx=ROOT/'patches/dxmt-metalfx-upscaling.patch'
     if hashlib.sha256(metalfx.read_bytes()).hexdigest()!='87ab3e3a74a1c140653d6d66cda6576049472c8999afab68bccc866e48028b17':raise ValueError('Accepted MetalFX patch changed')
-    check=subprocess.run(['git','apply','--check',str(metalfx)],cwd=source,capture_output=True)
-    if check.returncode==0:run('git','apply',metalfx,cwd=source)
-    else:run('git','apply','--reverse','--check',metalfx,cwd=source)
+    run('git','apply',metalfx,cwd=source)
     # 1.4: the shader pack holds every learned pipeline. Its archives are hashed in pieces instead
     # of read whole, have no total size limit, and can be prepared in batches that each add one
     # (DXMT_PIPELINE_CACHE_APPEND); learning goes on until the disk is nearly full.
     shader_pack=ROOT/'patches/dxmt-shader-pack.patch'
     if hashlib.sha256(shader_pack.read_bytes()).hexdigest()!='26b64c19f499e4e7fbccfa9402ab0bdd5a0e383af2d5098aa00c9abcd7182773':raise ValueError('Accepted shader pack patch changed')
-    check=subprocess.run(['git','apply','--check',str(shader_pack)],cwd=source,capture_output=True)
-    if check.returncode==0:run('git','apply',shader_pack,cwd=source)
-    else:run('git','apply','--reverse','--check',shader_pack,cwd=source)
+    run('git','apply',shader_pack,cwd=source)
     # Pawpad: a compute pipeline Metal refuses to build has its dispatches skipped. Encoding them
     # without a pipeline divided by zero in Apple's GPU driver and froze Aniimo at 100% loading.
     skip_failed=ROOT/'patches/dxmt-skip-failed-compute.patch'
     if hashlib.sha256(skip_failed.read_bytes()).hexdigest()!='9da53f1e033ba1b503e161cb450da47458c7b5ccc231a989335e9d1427e9cde5':raise ValueError('Accepted failed-pipeline patch changed')
-    check=subprocess.run(['git','apply','--check',str(skip_failed)],cwd=source,capture_output=True)
-    if check.returncode==0:run('git','apply',skip_failed,cwd=source)
-    else:run('git','apply','--reverse','--check',skip_failed,cwd=source)
-    return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed}
+    run('git','apply',skip_failed,cwd=source)
+    # Pawpad: DXMT_RECORD_TRIGGER starts the D3D11 recorder when a file appears, so a recording
+    # can begin once the game is in the world without pressing keys in the game.
+    record_trigger=ROOT/'patches/dxmt-record-trigger.patch'
+    if hashlib.sha256(record_trigger.read_bytes()).hexdigest()!='0d44e2d46fe721370ec8b94f6c473feb49c104562bc747b8d1c1a2737474c895':raise ValueError('Accepted record-trigger patch changed')
+    run('git','apply',record_trigger,cwd=source)
+    return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger}
 
 
 def build(work,tools,jobs,signing=SIGNING):
@@ -108,6 +104,7 @@ def build(work,tools,jobs,signing=SIGNING):
         'metalfx_patch_sha256':hashlib.sha256(metalfx.read_bytes()).hexdigest(),'nvapi':NVAPI,
         'shader_pack_patch_sha256':hashlib.sha256(shader_pack.read_bytes()).hexdigest(),
         'skip_failed_compute_patch_sha256':hashlib.sha256(patches['skip_failed'].read_bytes()).hexdigest(),
+        'record_trigger_patch_sha256':hashlib.sha256(patches['record_trigger'].read_bytes()).hexdigest(),
         'nvngx_certificate_sha256':hashlib.sha256((signing/sign_pe.LEAF).read_bytes()).hexdigest(),
         'portable_metal_patch_sha256':hashlib.sha256(portable_patch.read_bytes()).hexdigest(),
         'portable_metal_wrapper_sha256':hashlib.sha256(wrapper.read_bytes()).hexdigest(),
