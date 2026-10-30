@@ -444,6 +444,7 @@ static void endSession(NSString *engine) {
  * Metal validation (launch --metal-validation 1|2) goes the same way, for finding GPU faults:
  * 1 checks the API calls, 2 also checks every shader's memory access (much slower). Errors are
  * logged and the game carries on, rather than stopping at the first one. */
+#include "pawpad_metalfx.h"
 static NSMutableDictionary *clientEnvironment(NSMutableDictionary *env, BOOL hud, int validation) {
     launcherSize(env);
     if(hud)[env addEntriesFromDictionary:@{@"MTL_HUD_ENABLED":@"1",@"MTL_HUD_DISABLE_MENU_BAR":@"1",
@@ -473,7 +474,7 @@ static NSDictionary *extraEnvironment(NSString *spec) {
     }
     return extra;
 }
-static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, NSString *logging, NSString *loggingCustom, NSString *extraSpec) {
+static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, NSString *logging, NSString *loggingCustom, NSString *extraSpec, BOOL metalfx, NSString *sharpening) {
     // Both checked before anything changes: a rejected --env leaves the session and settings alone.
     NSDictionary *logs=loggingEnvironment(logging,loggingCustom),*extra=extraEnvironment(extraSpec);
     requireRosetta();
@@ -495,7 +496,9 @@ static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, N
     }
     if(displaysChanged)endSession(engine);
     configureRetinaMode(engine);
-    if(![aniimoRendererProfile(gameExecutable()) writeToFile:join(root,@"dxmt.conf") atomically:YES encoding:NSUTF8StringEncoding error:nil])fail(@"settings_write_failed");
+    // MetalFX upscaling (pawpad_metalfx.h): the DLSS stand-in in system32 or put back, sharpening.
+    NSString *sharpness=nil;metalfx=configureAniimoMetalFX(engine,metalfx,sharpening,&sharpness);
+    if(![aniimoSharpeningProfile(aniimoRendererProfile(gameExecutable()),gameExecutable(),sharpness) writeToFile:join(root,@"dxmt.conf") atomically:YES encoding:NSUTF8StringEncoding error:nil])fail(@"settings_write_failed");
     event(@"display",@{@"retina_mode":@(retinaModeOn()),@"game":gameExecutable()});
     // Setup applies these; a launch puts back any that went missing.
     configureProxy(engine,proxyDetectionChosen());
@@ -504,6 +507,7 @@ static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, N
     configureVoiceMicrophone(engine,nil,YES,YES);
     if(displays) {NSMutableDictionary *s=state();s[@"session_displays"]=displays;writeJSON(s,join(root,@"state.json"));}
     NSMutableDictionary *env=clientEnvironment(wineEnv(engine),hud,validation);
+    if(metalfx)[env addEntriesFromDictionary:aniimoMetalFXEnvironment()];
     // The launcher, and the game it starts, run inside the game's app bundle (pawpad_shell.h).
     NSString *loader=shell ? ensureShell(engine) : join(engine,@"bin/wine");
     env[@"WINELOADER"]=loader;
@@ -513,7 +517,8 @@ static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, N
     [env addEntriesFromDictionary:logs];
     NSMutableDictionary *record=[@{@"logging":logs.count ? logging : @"off",@"winedebug":env[@"WINEDEBUG"],@"dxmt_log_level":env[@"DXMT_LOG_LEVEL"],
         @"runtime":state()[@"active_runtime"],@"game":gameExecutable(),@"metal_hud":@(hud),@"metal_validation":@(validation),@"app_shell":@(shell),@"profile":pawpadProfileVersion,@"retina_mode":@(retinaModeOn()),
-        @"recording":@(recording)} mutableCopy];
+        @"recording":@(recording),@"metalfx":@(metalfx)} mutableCopy];
+    if(sharpness)record[@"metalfx_sharpness"]=sharpness;
     if([logging isEqual:@"custom"])record[@"logging_custom"]=loggingCustom;
     if(extra.count)record[@"extra_env"]=extra;
     if(recording)record[@"machine"]=machineRecord();
@@ -597,7 +602,9 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
         // (extraEnvironment); --logging off|crashes|graphics|custom.
         // --record 1 records the session (Settings › Record performance): the flight recorder in
         // pawpad_recorder.h, and pawpad-perf's report when it ends.
-        else if([command isEqual:@"launch"])launchClient([options[@"metal-hud"] isEqual:@"1"],[options[@"metal-validation"] intValue],![options[@"app-shell"] isEqual:@"0"],[options[@"record"] isEqual:@"1"],options[@"logging"] ?: @"off",options[@"logging-custom"],options[@"env"]);
+        // --metalfx 1 offers DLSS on MetalFX, with --sharpening off|low|high (pawpad_metalfx.h); off by
+        // default, and a launch without it puts back what an earlier one changed.
+        else if([command isEqual:@"launch"])launchClient([options[@"metal-hud"] isEqual:@"1"],[options[@"metal-validation"] intValue],![options[@"app-shell"] isEqual:@"0"],[options[@"record"] isEqual:@"1"],options[@"logging"] ?: @"off",options[@"logging-custom"],options[@"env"],[options[@"metalfx"] isEqual:@"1"],options[@"sharpening"] ?: @"off");
         // A marker on the current session's timeline (--label: what is about to happen, e.g. "entering world").
         else if([command isEqual:@"mark"])markSession(options[@"label"]);
         else if([command isEqual:@"logging"])event(@"logging",@{@"setting":options[@"setting"] ?: @"off",@"environment":loggingEnvironment(options[@"setting"] ?: @"off",options[@"custom"])});
