@@ -533,7 +533,14 @@ static void closeClient(NSString *gameRunning) {
         NSArray *rows=sessionProcesses();NSMutableArray *clients=[NSMutableArray array];
         for(NSDictionary *p in rows) {if([p[@"kind"] isEqual:@"game"])fail(gameRunning);[clients addObject:p];}
         if(!clients.count) {closed=YES;break;}
-        if(attempt==0) {event(@"closing_client",nil);for(NSDictionary *p in clients)kill([p[@"pid"] intValue],SIGTERM);}
+        // Only the launcher's own program is asked to quit. The other programs in its folder (its
+        // repair tool, the anti-cheat's cleaner) end with it or with the session, never by a signal
+        // aimed at them.
+        if(attempt==0) {
+            event(@"closing_client",nil);
+            // Launcher.exe (the stub kept in state.json) and <version>\PC-Launcher.exe (what it starts).
+            for(NSDictionary *p in clients)if([[p[@"name"] lowercaseString] hasSuffix:@"launcher.exe"])kill([p[@"pid"] intValue],SIGTERM);
+        }
         else if(attempt==10)waitTask(task(join(engine,@"bin/wineserver"),@[@"-k"],wineEnv(engine),@"client-stop.log"),15);
         [NSThread sleepForTimeInterval:1];
     }

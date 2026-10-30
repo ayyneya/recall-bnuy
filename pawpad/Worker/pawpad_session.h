@@ -35,11 +35,12 @@ static NSArray *sessionProcesses(void) {
     NSMutableArray *found=[NSMutableArray array];
     for(NSString *line in [table componentsSeparatedByString:@"\n"]) {
         NSTextCheckingResult *m=[rx firstMatchInString:line options:0 range:NSMakeRange(0,line.length)];if(!m)continue;
-        NSString *kind=processKind([[line substringWithRange:[m rangeAtIndex:3]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet],game,launcher);
+        NSString *name=[[line substringWithRange:[m rangeAtIndex:3]] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        NSString *kind=processKind(name,game,launcher);
         if(!kind)continue;
         NSString *pid=[line substringWithRange:[m rangeAtIndex:1]],*start=[line substringWithRange:[m rangeAtIndex:2]];
         NSString *identity=[NSString stringWithFormat:@"%@|%@",pid,start];
-        if(membershipCache[identity]) { if([membershipCache[identity] boolValue])[found addObject:@{@"pid":@(pid.intValue),@"identity":start,@"kind":kind}];continue; }
+        if(membershipCache[identity]) { if([membershipCache[identity] boolValue])[found addObject:@{@"pid":@(pid.intValue),@"identity":start,@"kind":kind,@"name":name}];continue; }
         // Pawpad's own Wine: the process runs this data folder's engine or its app bundle (its native executable,
         // one call to the kernel; lsof took seconds per process). Only Pawpad's environment uses it.
         char executable[PROC_PIDPATHINFO_MAXSIZE];
@@ -48,7 +49,7 @@ static NSArray *sessionProcesses(void) {
         NSString *resolved=[@(executable) stringByResolvingSymlinksInPath];
         BOOL member=[resolved hasPrefix:engine] || [resolved hasPrefix:shells];
         membershipCache[identity]=@(member);
-        if(member)[found addObject:@{@"pid":@([pid intValue]),@"identity":start,@"kind":kind}];
+        if(member)[found addObject:@{@"pid":@([pid intValue]),@"identity":start,@"kind":kind,@"name":name}];
     }
     [fm removeItemAtPath:join(join(root,@"logs"),[NSString stringWithFormat:@"session-query-%d.log",getpid()]) error:nil];
     return found;
