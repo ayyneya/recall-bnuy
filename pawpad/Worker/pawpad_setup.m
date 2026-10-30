@@ -344,6 +344,8 @@ static void pruneRuntimes(NSString *active, NSString *previous) {
         NSString *path=join(directory,name);struct stat st;
         if(lstat(path.fileSystemRepresentation,&st) || !S_ISDIR(st.st_mode) || ![fm fileExistsAtPath:join(path,@"runtime.json")])continue;
         [fm removeItemAtPath:path error:nil];
+        // and the engine's app shell (pawpad_shell.h), whose links pointed into it
+        [fm removeItemAtPath:join(join(root,@"app-shell"),name) error:nil];
     }
 }
 static void installRuntime(NSString *archivePath, NSString *expected, NSString *version, BOOL repair) {
@@ -455,19 +457,25 @@ static void closeClient(NSString *gameRunning);
 /* --env "KEY=VALUE;KEY=VALUE": extra environment for one launch (a test's switches, e.g.
  * DXMT_CONFIG or DXMT_RECORD_*), applied last and kept in the session record. Only DXMT_, MTL_,
  * WINENCPU (CrossOver's processor count) and WINEMSYNC_QLIMIT names are taken: nothing here may
- * reach Wine's own paths or the account. */
+ * reach Wine's own paths or the account. DXMT_CONFIG separates its own options with ';' too, so a
+ * piece after it that doesn't start another allowed name is one of its options:
+ * "DXMT_CONFIG=dxgi.presentPacing=True;dxgi.presentPacingMode=3;DXMT_LOG_LEVEL=info". */
 static NSDictionary *extraEnvironment(NSString *spec) {
-    NSMutableDictionary *extra=[NSMutableDictionary dictionary];
-    for(NSString *pair in [spec ?: @"" componentsSeparatedByString:@";"]) {
-        NSRange eq=[pair rangeOfString:@"="];if(eq.location==NSNotFound)continue;
-        NSString *key=[[pair substringToIndex:eq.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-        if(!matches(key,@"^(DXMT_[A-Z0-9_]+|MTL_[A-Z0-9_]+|WINENCPU|WINEMSYNC_QLIMIT)$"))fail(@"launch_env_rejected");
-        extra[key]=[pair substringFromIndex:eq.location+1];
+    NSMutableDictionary *extra=[NSMutableDictionary dictionary];NSString *key=nil;
+    for(NSString *piece in [spec ?: @"" componentsSeparatedByString:@";"]) {
+        NSRange eq=[piece rangeOfString:@"="];
+        NSString *name=eq.location==NSNotFound ? nil : [[piece substringToIndex:eq.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        BOOL allowed=name && matches(name,@"^(DXMT_[A-Z0-9_]+|MTL_[A-Z0-9_]+|WINENCPU|WINEMSYNC_QLIMIT)$");
+        if(!allowed && [key isEqual:@"DXMT_CONFIG"]) {extra[key]=[extra[key] stringByAppendingFormat:@";%@",piece];continue;}
+        if(!name)continue;
+        if(!allowed)fail(@"launch_env_rejected");
+        key=name;extra[key]=[piece substringFromIndex:eq.location+1];
     }
     return extra;
 }
 static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, NSString *logging, NSString *loggingCustom, NSString *extraSpec) {
-    NSDictionary *logs=loggingEnvironment(logging,loggingCustom);
+    // Both checked before anything changes: a rejected --env leaves the session and settings alone.
+    NSDictionary *logs=loggingEnvironment(logging,loggingCustom),*extra=extraEnvironment(extraSpec);
     requireRosetta();
     NSString *engine=runtime(),*launcher=launcherPath();
     if(!launcher)fail(@"launcher_not_installed");
@@ -507,13 +515,12 @@ static void launchClient(BOOL hud, int validation, BOOL shell, BOOL recording, N
         @"runtime":state()[@"active_runtime"],@"game":gameExecutable(),@"metal_hud":@(hud),@"metal_validation":@(validation),@"app_shell":@(shell),@"profile":pawpadProfileVersion,@"retina_mode":@(retinaModeOn()),
         @"recording":@(recording)} mutableCopy];
     if([logging isEqual:@"custom"])record[@"logging_custom"]=loggingCustom;
-    NSDictionary *extra=extraEnvironment(extraSpec);
     if(extra.count)record[@"extra_env"]=extra;
     if(recording)record[@"machine"]=machineRecord();
     stopMonitor();
     NSString *session=startSessionLog(record);
     if(recording)[env addEntriesFromDictionary:recorderEnvironment(sessionFolder(session))];
-    [env addEntriesFromDictionary:extraEnvironment(extraSpec)];
+    [env addEntriesFromDictionary:extra];
     NSTask *p=taskIn(loader,@[windowsPath(launcher)],env,[NSString stringWithFormat:@"sessions/%@/wine.log",session],launcher.stringByDeletingLastPathComponent);
     saveStage(@"launcher_started");event(@"launcher_open",@{@"pid":@(p.processIdentifier),@"session":session,@"recording":@(recording)});
     task(NSProcessInfo.processInfo.arguments[0],@[@"watch",@"--root",root,@"--session",session,@"--record",recording ? @"1" : @"0"],nil,[NSString stringWithFormat:@"client-monitor-%d.log",getpid()]);
@@ -533,8 +540,12 @@ static void closeClient(NSString *gameRunning) {
         // aimed at them.
         if(attempt==0) {
             event(@"closing_client",nil);
-            // Launcher.exe (the stub kept in state.json) and <version>\PC-Launcher.exe (what it starts).
-            for(NSDictionary *p in clients)if([[p[@"name"] lowercaseString] hasSuffix:@"launcher.exe"])kill([p[@"pid"] intValue],SIGTERM);
+            // Launcher.exe (the stub kept in state.json) and <version>\PC-Launcher.exe (what it starts),
+            // by exact name: UacLauncher.exe, in the same folder, is one of the helpers.
+            for(NSDictionary *p in clients) {
+                NSString *program=[[[p[@"name"] lowercaseString] componentsSeparatedByString:@"\\"] lastObject];
+                if([program isEqual:@"launcher.exe"] || [program isEqual:@"pc-launcher.exe"])kill([p[@"pid"] intValue],SIGTERM);
+            }
         }
         else if(attempt==10)waitTask(task(join(engine,@"bin/wineserver"),@[@"-k"],wineEnv(engine),@"client-stop.log"),15);
         [NSThread sleepForTimeInterval:1];

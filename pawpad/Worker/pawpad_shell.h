@@ -10,30 +10,61 @@
  * x86_64-windows, i386-windows and game-mode folders; Aniimo.app/share and Aniimo.app/bin link
  * to the engine's. The loader copy is signed ad hoc with the original's entitlements, outside the
  * bundle: signed in place, codesign would want to seal the links, and a copy keeping CodeWeavers'
- * signature is killed for an invalid signature once a bundle's Info.plist is beside it. */
+ * signature is killed for an invalid signature once a bundle's Info.plist is beside it.
+ *
+ * The copy also gets its own LC_UUID, as scripts/game_mode_app.py gives Recall's: local network
+ * privacy keys apps by their main executable's UUID, and the loader's is shared by every Wine
+ * process of every engine (Recall's included), which would all take the game's choice. */
 static NSString *const shellBundleID=@"dev.neya.pawpad.game";
-static NSString *const shellLayout=@"2";
+static NSString *const shellLayout=@"3";
 static NSString *shellFolder(NSString *engine) { return join(join(root,@"app-shell"),engine.lastPathComponent); }
 static NSString *shellLoader(NSString *engine) { return join(shellFolder(engine),@"Aniimo.app/Contents/MacOS/wine"); }
 static BOOL linkInto(NSString *target, NSString *link) {
     return [fm createSymbolicLinkAtPath:link withDestinationPath:target error:nil];
 }
+// The LC_UUID of a 64-bit Mach-O file becomes uuid5(its UUID, identifier), as game_mode_app.py makes it.
+static BOOL giveOwnUUID(NSString *path, NSString *identifier) {
+    NSMutableData *data=[NSMutableData dataWithContentsOfFile:path];
+    uint8_t *bytes=data.mutableBytes;uint32_t magic=0,count=0;
+    if(data.length<32)return NO;
+    memcpy(&magic,bytes,4);memcpy(&count,bytes+16,4);
+    if(magic!=0xfeedfacf)return NO;
+    for(size_t offset=32,i=0;i<count && offset+8<=data.length;i++) {
+        uint32_t cmd=0,size=0;memcpy(&cmd,bytes+offset,4);memcpy(&size,bytes+offset+4,4);
+        if(cmd==0x1b && offset+24<=data.length) {
+            NSMutableData *name=[NSMutableData dataWithBytes:bytes+offset+8 length:16];
+            [name appendData:[identifier dataUsingEncoding:NSUTF8StringEncoding]];
+            uint8_t digest[CC_SHA1_DIGEST_LENGTH];CC_SHA1(name.bytes,(CC_LONG)name.length,digest);
+            digest[6]=(uint8_t)((digest[6]&0x0f)|0x50);digest[8]=(uint8_t)((digest[8]&0x3f)|0x80);
+            memcpy(bytes+offset+8,digest,16);
+            return [data writeToFile:path options:0 error:nil];
+        }
+        if(size<8)return NO;
+        offset+=size;
+    }
+    return NO;
+}
 static NSString *ensureShell(NSString *engine) {
     NSString *folder=shellFolder(engine),*unix=join(engine,@"lib/wine/x86_64-unix");
-    NSString *stamp=[NSString stringWithFormat:@"%@ %@ %@",shellLayout,hashFile(join(unix,@"wine")),hashFile(join(unix,@"ntdll.so"))];
+    // The engine's own path is in the stamp, and a kept shell must still reach the engine: its links
+    // are absolute, so a data folder that moved (another account, Migration Assistant) rebuilds it.
+    NSString *stamp=[NSString stringWithFormat:@"%@ %@ %@ %@",shellLayout,engine.stringByResolvingSymlinksInPath,hashFile(join(unix,@"wine")),hashFile(join(unix,@"ntdll.so"))];
     NSString *kept=[NSString stringWithContentsOfFile:join(folder,@"stamp") encoding:NSUTF8StringEncoding error:nil];
-    if([kept isEqual:stamp] && [fm isExecutableFileAtPath:shellLoader(engine)])return shellLoader(engine);
+    if([kept isEqual:stamp] && [fm isExecutableFileAtPath:shellLoader(engine)] &&
+       [fm fileExistsAtPath:join(folder,@"Aniimo.app/Contents/MacOS/x86_64-windows")])return shellLoader(engine);
     NSString *build=[folder stringByAppendingString:@".building"];
     [fm removeItemAtPath:build error:nil];
     NSString *app=join(build,@"Aniimo.app"),*macos=join(app,@"Contents/MacOS");
     mkdirs(macos);
     if(![fm copyItemAtPath:join(unix,@"ntdll.so") toPath:join(macos,@"ntdll.so") error:nil])fail(@"app_shell_failed");
+    // Hidden files (a .DS_Store Finder left, which verifyRuntime accepts) aren't linked: the same name
+    // in both folders would make the second link fail.
     for(NSString *name in [fm contentsOfDirectoryAtPath:unix error:nil]) {
-        if([name isEqual:@"wine"] || [name isEqual:@"ntdll.so"])continue;
+        if([name hasPrefix:@"."] || [name isEqual:@"wine"] || [name isEqual:@"ntdll.so"])continue;
         if(!linkInto(join(unix,name),join(macos,name)))fail(@"app_shell_failed");
     }
     for(NSString *name in [fm contentsOfDirectoryAtPath:join(engine,@"lib") error:nil]) {
-        if([name isEqual:@"wine"])continue;
+        if([name hasPrefix:@"."] || [name isEqual:@"wine"])continue;
         if(!linkInto(join(join(engine,@"lib"),name),join(macos,name)))fail(@"app_shell_failed");
     }
     for(NSString *name in @[@"x86_64-unix",@"x86_64-windows",@"i386-windows",@"game-mode"])
@@ -54,7 +85,7 @@ static NSString *ensureShell(NSString *engine) {
         @"NSLocalNetworkUsageDescription":@"Aniimo looks up your Mac's address on your local network when it starts."};
     if(![info writeToFile:join(app,@"Contents/Info.plist") atomically:YES])fail(@"app_shell_failed");
     NSString *entitlements=join(build,@"entitlements.plist"),*signedCopy=join(build,@"wine");
-    if(![fm copyItemAtPath:join(unix,@"wine") toPath:signedCopy error:nil])fail(@"app_shell_failed");
+    if(![fm copyItemAtPath:join(unix,@"wine") toPath:signedCopy error:nil] || !giveOwnUUID(signedCopy,shellBundleID))fail(@"app_shell_failed");
     if(waitTask(task(@"/usr/bin/codesign",@[@"-d",@"--entitlements",entitlements,@"--xml",join(unix,@"wine")],@{},@"app-shell.log"),30) ||
        waitTask(task(@"/usr/bin/codesign",@[@"-f",@"-s",@"-",@"--options",@"runtime",@"--entitlements",entitlements,@"--identifier",shellBundleID,signedCopy],@{},@"app-shell.log"),30))
         fail(@"app_shell_signing_failed");

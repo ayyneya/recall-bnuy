@@ -5,7 +5,10 @@
  * never writes them. */
 static NSString *capture(NSString *exe, NSArray *args) {
     NSTask *p=task(exe,args,@{@"PATH":@"/usr/bin:/bin:/usr/sbin:/sbin",@"LC_ALL":@"C"},[NSString stringWithFormat:@"session-query-%d.log",getpid()]);
-    if(waitTask(p,5))return nil;
+    // ps -p exits 1 when a listed process has exited by the time it runs (it still lists the
+    // others): the list is taken a moment earlier, so that is an answer, not a failure.
+    int status=waitTask(p,5);
+    if(status!=0 && status!=1)return nil;
     NSString *path=join(join(root,@"logs"),[NSString stringWithFormat:@"session-query-%d.log",getpid()]);
     if([[fm attributesOfItemAtPath:path error:nil][NSFileSize] unsignedLongLongValue]>(4ULL<<20))return nil;
     return [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil];
