@@ -1,0 +1,41 @@
+diff --git a/src/d3d11/d3d11_texture_device.cpp b/src/d3d11/d3d11_texture_device.cpp
+index 2744382..744e675 100644
+--- a/src/d3d11/d3d11_texture_device.cpp
++++ b/src/d3d11/d3d11_texture_device.cpp
+@@ -478,7 +478,15 @@ HRESULT CreateDeviceTextureInternal(MTLD3D11Device *pDevice,
+   if (finalDesc.Usage == D3D11_USAGE_IMMUTABLE)
+     flags.set(TextureAllocationFlag::GpuReadonly);
+   if (single_subresource && (finalDesc.BindFlags & D3D11_BIND_DEPTH_STENCIL)) {
+-    Rc<RenamableTexturePool> renamable = new RenamableTexturePool(texture.ptr(), 32, flags);
++    // Pawpad: DXMT_DEPTH_RENAME_CAP limits how many copies a depth texture may get from full
++    // clears within one command buffer (default 32, DXMT's own value). Each copy is a full texture
++    // that is never freed while the texture lives.
++    static const size_t depth_rename_cap = [] {
++      auto v = env::getEnvVar("DXMT_DEPTH_RENAME_CAP");
++      long n = v.empty() ? 32 : std::strtol(v.c_str(), nullptr, 10);
++      return size_t(n < 1 ? 1 : n > 32 ? 32 : n);
++    }();
++    Rc<RenamableTexturePool> renamable = new RenamableTexturePool(texture.ptr(), depth_rename_cap, flags);
+     initialize(renamable->getNext(0));
+     *ppTexture = reinterpret_cast<typename tag::COM_IMPL *>(
+         ref(new DeviceTexture<tag>(&finalDesc, std::move(texture), std::move(renamable), pDevice)));
+diff --git a/src/dxmt/dxmt_texture.cpp b/src/dxmt/dxmt_texture.cpp
+index b4fa862..c78b29a 100644
+--- a/src/dxmt/dxmt_texture.cpp
++++ b/src/dxmt/dxmt_texture.cpp
+@@ -362,8 +362,14 @@ RenamableTexturePool::getNext(uint64_t frame) {
+     current_index_ = 0;
+   }
+   auto current_index = current_index_++ % capacity_;
+-  if (!allocations_[current_index].ptr())
++  if (!allocations_[current_index].ptr()) {
+     allocations_[current_index] = texture_->allocate(allocation_flags_);
++    // Pawpad: say when a depth texture's copies pile up (they are kept for its whole life).
++    unsigned copies = current_index + 1;
++    if (copies == 3 || copies == 9 || copies == 17 || copies == 32)
++      ERR("depth texture ", texture_->width(), "x", texture_->height(), " format ", (uint32_t)texture_->pixelFormat(),
++           " now has ", copies, " renamed copies");
++  }
+   return allocations_[current_index];
+ }
+ 
