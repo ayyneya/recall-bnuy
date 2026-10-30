@@ -455,14 +455,15 @@ static NSMutableDictionary *clientEnvironment(NSMutableDictionary *env, BOOL hud
 }
 static void closeClient(NSString *gameRunning);
 /* --env "KEY=VALUE;KEY=VALUE": extra environment for one launch (a test's switches, e.g.
- * DXMT_CONFIG or DXMT_RECORD_*), applied last and kept in the session record. Only DXMT_, MTL_ and
- * WINE_CPU_TOPOLOGY names are taken: nothing here may reach Wine's own paths or the account. */
+ * DXMT_CONFIG or DXMT_RECORD_*), applied last and kept in the session record. Only DXMT_, MTL_,
+ * WINENCPU (CrossOver's processor count) and WINEMSYNC_QLIMIT names are taken: nothing here may
+ * reach Wine's own paths or the account. */
 static NSDictionary *extraEnvironment(NSString *spec) {
     NSMutableDictionary *extra=[NSMutableDictionary dictionary];
     for(NSString *pair in [spec ?: @"" componentsSeparatedByString:@";"]) {
         NSRange eq=[pair rangeOfString:@"="];if(eq.location==NSNotFound)continue;
         NSString *key=[[pair substringToIndex:eq.location] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-        if(!matches(key,@"^(DXMT_[A-Z0-9_]+|MTL_[A-Z0-9_]+|WINE_CPU_TOPOLOGY)$"))fail(@"launch_env_rejected");
+        if(!matches(key,@"^(DXMT_[A-Z0-9_]+|MTL_[A-Z0-9_]+|WINENCPU|WINEMSYNC_QLIMIT)$"))fail(@"launch_env_rejected");
         extra[key]=[pair substringFromIndex:eq.location+1];
     }
     return extra;

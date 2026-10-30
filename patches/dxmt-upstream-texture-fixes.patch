@@ -1,0 +1,171 @@
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index 5a1f578..4ff4656 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -323,6 +323,7 @@ public:
+   MTL_DXGI_FORMAT_DESC SrcFormat;
+   MTL_DXGI_FORMAT_DESC DstFormat;
+ 
++  bool DimensionIncompatible;
+   bool Invalid = true;
+ 
+   TextureCopyCommand(
+@@ -334,9 +335,8 @@ public:
+       SrcSubresource(SrcSubresource),
+       DstSubresource(DstSubresource),
+       SrcFormat(Src_.FormatDescription),
+-      DstFormat(Dst_.FormatDescription) {
+-    if (Dst_.Dimension != Src_.Dimension)
+-      return;
++      DstFormat(Dst_.FormatDescription),
++      DimensionIncompatible(Dst_.Dimension != Src_.Dimension) {
+ 
+     if (SrcFormat.PixelFormat == WMTPixelFormatInvalid)
+       return;
+@@ -349,7 +349,49 @@ public:
+     }
+     case D3D11_RESOURCE_DIMENSION_TEXTURE1D: {
+       D3D11_TEXTURE1D_DESC &dst_desc = Dst_.Texture1DDesc;
++      if (DstSubresource >= dst_desc.MipLevels * dst_desc.ArraySize) return;
++
++      Dst.Format = dst_desc.Format;
++      Dst.MipLevel = DstSubresource % dst_desc.MipLevels;
++      Dst.ArraySlice = DstSubresource / dst_desc.MipLevels;
++      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
++      Dst.Height = 1;
++      Dst.Depth = 1;
++      break;
++    }
++    case D3D11_RESOURCE_DIMENSION_TEXTURE2D: {
++      D3D11_TEXTURE2D_DESC1 &dst_desc = Dst_.Texture2DDesc;
++      if (DstSubresource >= dst_desc.MipLevels * dst_desc.ArraySize) return;
++
++      Dst.Format = dst_desc.Format;
++      Dst.MipLevel = DstSubresource % dst_desc.MipLevels;
++      Dst.ArraySlice = DstSubresource / dst_desc.MipLevels;
++      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
++      Dst.Height = std::max(1u, dst_desc.Height >> Dst.MipLevel);
++      Dst.Depth = 1;
++      break;
++    }
++    case D3D11_RESOURCE_DIMENSION_TEXTURE3D: {
++      D3D11_TEXTURE3D_DESC1 &dst_desc = Dst_.Texture3DDesc;
++      if (DstSubresource >= dst_desc.MipLevels) return;
++
++      Dst.Format = dst_desc.Format;
++      Dst.MipLevel = DstSubresource;
++      Dst.ArraySlice = 0;
++      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
++      Dst.Height = std::max(1u, dst_desc.Height >> Dst.MipLevel);
++      Dst.Depth = std::max(1u, dst_desc.Depth >> Dst.MipLevel);
++      break;
++    }
++    }
++
++    switch (Src_.Dimension) {
++    default: {
++      return;
++    }
++    case D3D11_RESOURCE_DIMENSION_TEXTURE1D: {
+       D3D11_TEXTURE1D_DESC &src_desc = Src_.Texture1DDesc;
++      if (SrcSubresource >= src_desc.MipLevels * src_desc.ArraySize) return;
+ 
+       Src.Format = src_desc.Format;
+       Src.MipLevel = SrcSubresource % src_desc.MipLevels;
+@@ -358,17 +400,11 @@ public:
+       Src.Height = 1;
+       Src.Depth = 1;
+ 
+-      Dst.Format = dst_desc.Format;
+-      Dst.MipLevel = DstSubresource % dst_desc.MipLevels;
+-      Dst.ArraySlice = DstSubresource / dst_desc.MipLevels;
+-      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
+-      Dst.Height = 1;
+-      Dst.Depth = 1;
+       break;
+     }
+     case D3D11_RESOURCE_DIMENSION_TEXTURE2D: {
+-      D3D11_TEXTURE2D_DESC1 &dst_desc = Dst_.Texture2DDesc;
+       D3D11_TEXTURE2D_DESC1 &src_desc = Src_.Texture2DDesc;
++      if (SrcSubresource >= src_desc.MipLevels * src_desc.ArraySize) return;
+ 
+       Src.Format = src_desc.Format;
+       Src.MipLevel = SrcSubresource % src_desc.MipLevels;
+@@ -377,17 +413,11 @@ public:
+       Src.Height = std::max(1u, src_desc.Height >> Src.MipLevel);
+       Src.Depth = 1;
+ 
+-      Dst.Format = dst_desc.Format;
+-      Dst.MipLevel = DstSubresource % dst_desc.MipLevels;
+-      Dst.ArraySlice = DstSubresource / dst_desc.MipLevels;
+-      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
+-      Dst.Height = std::max(1u, dst_desc.Height >> Dst.MipLevel);
+-      Dst.Depth = 1;
+       break;
+     }
+     case D3D11_RESOURCE_DIMENSION_TEXTURE3D: {
+-      D3D11_TEXTURE3D_DESC1 &dst_desc = Dst_.Texture3DDesc;
+       D3D11_TEXTURE3D_DESC1 &src_desc = Src_.Texture3DDesc;
++      if (SrcSubresource >= src_desc.MipLevels) return;
+ 
+       Src.Format = src_desc.Format;
+       Src.MipLevel = SrcSubresource;
+@@ -395,14 +425,6 @@ public:
+       Src.Width = std::max(1u, src_desc.Width >> Src.MipLevel);
+       Src.Height = std::max(1u, src_desc.Height >> Src.MipLevel);
+       Src.Depth = std::max(1u, src_desc.Depth >> Src.MipLevel);
+-
+-      Dst.Format = dst_desc.Format;
+-      Dst.MipLevel = DstSubresource;
+-      Dst.ArraySlice = 0;
+-      Dst.Width = std::max(1u, dst_desc.Width >> Dst.MipLevel);
+-      Dst.Height = std::max(1u, dst_desc.Height >> Dst.MipLevel);
+-      Dst.Depth = std::max(1u, dst_desc.Depth >> Dst.MipLevel);
+-
+       break;
+     }
+     }
+@@ -1114,6 +1136,8 @@ public:
+       break;
+     }
+     default:
++      if (Src.Dimension == D3D11_RESOURCE_DIMENSION_BUFFER)
++        return;
+       CopyTexture(TextureCopyCommand(Dst, DstSubresource, DstX, DstY, DstZ, Src, SrcSubresource, pSrcBox));
+       break;
+     }
+@@ -4033,7 +4057,7 @@ public:
+           auto dst_format = dst_->pixelFormat();
+           auto src = enc.access(src_, cmd.Src.MipLevel, cmd.Src.ArraySlice, ResourceAccess::Read);
+           auto dst = enc.access(dst_, cmd.Dst.MipLevel, cmd.Dst.ArraySlice, ResourceAccess::Write);
+-          if (Forget_sRGB(dst_format) != Forget_sRGB(src_format)) {
++          if (Forget_sRGB(dst_format) != Forget_sRGB(src_format) || cmd.DimensionIncompatible) {
+ 
+             // bitcast, using a temporary buffer
+             size_t bytes_per_row, bytes_per_image, bytes_total;
+diff --git a/src/dxmt/dxmt_context.cpp b/src/dxmt/dxmt_context.cpp
+index a9a1b1a..db0a932 100644
+--- a/src/dxmt/dxmt_context.cpp
++++ b/src/dxmt/dxmt_context.cpp
+@@ -481,8 +481,8 @@ ArgumentEncodingContext::clearColor(Rc<Texture> &&texture, uint64_t viewId, unsi
+   encoder_info->color = color;
+   SanitizeRTVClearColor(texture->pixelFormat(viewId), encoder_info->color);
+   encoder_info->array_length = arrayLength;
+-  encoder_info->width = texture->width();
+-  encoder_info->height = texture->height();
++  encoder_info->width = texture->width(viewId);
++  encoder_info->height = texture->height(viewId);
+   encoder_current = encoder_info;
+ 
+   encoder_info->attachment = access(texture, viewId, ResourceAccess::Write);
+@@ -505,8 +505,8 @@ ArgumentEncodingContext::clearDepthStencil(
+   encoder_info->clear_dsv = flag & DepthStencilPlanarFlags(texture->pixelFormat());
+   encoder_info->depth_stencil = {depth, stencil};
+   encoder_info->array_length = arrayLength;
+-  encoder_info->width = texture->width();
+-  encoder_info->height = texture->height();
++  encoder_info->width = texture->width(viewId);
++  encoder_info->height = texture->height(viewId);
+   encoder_current = encoder_info;
+ 
+   encoder_info->attachment = access(texture, viewId, ResourceAccess::Write);
