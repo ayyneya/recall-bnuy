@@ -97,6 +97,11 @@ def prepare_source(work):
     render_skip=ROOT/'patches/dxmt-skip-failed-render.patch'
     if hashlib.sha256(render_skip.read_bytes()).hexdigest()!='20053fa0cad13ca5d7f52ad5741e002c8071f60547d1864a7a24466c39913ebc':raise ValueError('Accepted failed-render patch changed')
     run('git','apply',render_skip,cwd=source);upstream['skip-failed-render']=render_skip
+    # Pawpad: DXMT_DEPTH_RENAME_CAP limits the copies a depth texture gets from full clears in one
+    # command buffer (default 32 as before), and the log says when a texture's copies pile up.
+    depth_cap=ROOT/'patches/dxmt-depth-rename-cap.patch'
+    if hashlib.sha256(depth_cap.read_bytes()).hexdigest()!='b92bd73215ff8ada509bbd8680ff6fb42dca6fa55fb4fe77a5bcb9c2d2ad08c9':raise ValueError('Accepted depth-rename patch changed')
+    run('git','apply',depth_cap,cwd=source);upstream['depth-rename-cap']=depth_cap
     return source,{'patch':patch,'performance':performance,'portable':portable_patch,'metalfx':metalfx,'shader_pack':shader_pack,'skip_failed':skip_failed,'record_trigger':record_trigger,'upstream':upstream}
 
 
