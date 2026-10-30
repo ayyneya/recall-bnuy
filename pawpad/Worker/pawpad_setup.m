@@ -23,11 +23,6 @@
 #include <libproc.h>
 #include <signal.h>
 #include <unistd.h>
-// Recall's contract also holds Overwatch's own settings and MetalFX's, which Pawpad doesn't use yet.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
-#include "candidate_contract.generated.h"
-#pragma clang diagnostic pop
 
 static NSFileManager *fm;
 static NSString *root;
