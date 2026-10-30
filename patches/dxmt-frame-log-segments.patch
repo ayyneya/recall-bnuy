@@ -1,0 +1,12 @@
+--- a/src/dxmt/dxmt_frame_log.hpp
++++ b/src/dxmt/dxmt_frame_log.hpp
+@@ -87,7 +87,8 @@
+ private:
+   static constexpr unsigned Capacity = 4096;
+ #ifndef DXMT_FRAME_SEGMENT_BYTES
+-#define DXMT_FRAME_SEGMENT_BYTES (2 * 1024 * 1024)
++// Pawpad: 8 MB, so the three segments hold ~80 minutes of frames at 45 FPS (2 MB held ~20).
++#define DXMT_FRAME_SEGMENT_BYTES (8 * 1024 * 1024)
+ #endif
+   static constexpr uint64_t SegmentBytes = DXMT_FRAME_SEGMENT_BYTES;
+   struct State {
