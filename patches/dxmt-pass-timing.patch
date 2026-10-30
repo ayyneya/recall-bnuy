@@ -1,0 +1,220 @@
+--- a/src/dxmt/dxmt_occlusion_query.hpp
++++ b/src/dxmt/dxmt_occlusion_query.hpp
+@@ -7,6 +7,7 @@
+ #include <cassert>
+ #include <cstdint>
+ #include <memory>
++#include <string>
+ #include <vector>
+ 
+ namespace dxmt {
+@@ -336,11 +337,52 @@
+   uint64_t num_samples_ = 0;
+   TimestampQueryList queries_;
+   WMT::Device device_;
++};
++
++// Pawpad diagnostics (DXMT_PASS_TIMING=<file>): a GPU timestamp before each encoder of a command
++// buffer and one after the last. Once the GPU has finished (the readback is destroyed on the
++// finish thread) every encoder's share of the command buffer is appended to the file.
++class PassTimingReadback {
++public:
++  static constexpr unsigned kMaxSamples = 4096;
++
++  PassTimingReadback(WMT::Device device, WMT::CommandBuffer cmdbuf, uint64_t frame, uint64_t seq, unsigned capacity) :
++      cmdbuf_(cmdbuf),
++      frame_(frame),
++      seq_(seq),
++      capacity_(capacity) {
++    sample_buffer_ = device.newCounterSampleBuffer(capacity, true);
++    labels_.reserve(capacity);
++  }
++  ~PassTimingReadback();
++
++  PassTimingReadback(const PassTimingReadback &) = delete;
++  PassTimingReadback(PassTimingReadback &&) = delete;
++
++  WMT::CounterSampleBuffer
++  sampleBuffer() {
++    return sample_buffer_;
++  }
++
++  // the index of the next sample, or ~0u when the buffer is full
++  unsigned
++  next() {
++    return labels_.size() < capacity_ ? (unsigned)labels_.size() : ~0u;
++  }
++
++  std::vector<std::string> labels_;
++
++private:
++  WMT::CommandBuffer cmdbuf_;
++  WMT::Reference<WMT::CounterSampleBuffer> sample_buffer_;
++  uint64_t frame_, seq_;
++  unsigned capacity_;
+ };
+ 
+ struct QueryReadbacks {
+   std::unique_ptr<VisibilityResultReadback> visibility;
+   std::unique_ptr<TimestampReadback> timestamp;
++  std::unique_ptr<PassTimingReadback> pass_timing;
+ };
+ 
+ } // namespace dxmt
+--- a/src/dxmt/dxmt_context.hpp
++++ b/src/dxmt/dxmt_context.hpp
+@@ -847,6 +847,10 @@
+   bool bench_labels = false;
+   uint64_t bench_label_frame = ~0ull;
+   unsigned bench_label_index = 0;
++  // Pawpad: DXMT_PASS_TIMING=<file> times every encoder on the GPU (implies the labels above);
++  // DXMT_PASS_TIMING_BARRIER=1 also keeps the GPU from overlapping neighbouring encoders.
++  bool pass_timing = false;
++  bool pass_timing_barrier = false;
+ 
+ private:
+   // Declared before the command helpers: ClearUAV's constructor builds its
+--- a/src/dxmt/dxmt_context.cpp
++++ b/src/dxmt/dxmt_context.cpp
+@@ -20,6 +20,7 @@
+  */
+ 
+ #include "dxmt_context.hpp"
++#include "util_env.hpp"
+ #include "Metal.hpp"
+ #include "dxmt_command_queue.hpp"
+ #include "dxmt_deptrack.hpp"
+@@ -946,14 +947,69 @@
+   return label;
+ }
+ 
++// the labels of the command buffer being timed (DXMT_PASS_TIMING); flushCommands runs on the
++// encode thread only
++thread_local std::vector<std::string> *bench_label_sink = nullptr;
++
+ template <typename Encoder>
+ void
+ bench_label(Encoder &encoder, const std::string &text) {
+   encoder.setLabel(WMT::String::string(text.c_str(), WMTUTF8StringEncoding));
++  if (bench_label_sink && !bench_label_sink->empty())
++    bench_label_sink->back() = text;
+ }
+ 
++const char *
++pass_timing_kind(EncoderType type) {
++  switch (type) {
++  case EncoderType::Render:
++    return "R";
++  case EncoderType::Compute:
++    return "C";
++  case EncoderType::Blit:
++    return "B";
++  case EncoderType::Clear:
++    return "Clear";
++  case EncoderType::Resolve:
++    return "Resolve";
++  case EncoderType::Present:
++    return "Present";
++  case EncoderType::SpatialUpscale:
++    return "SpatialUpscale";
++  case EncoderType::TemporalUpscale:
++    return "TemporalUpscale";
++  default:
++    return nullptr;
++  }
++}
++
++std::mutex pass_timing_mutex;
++FILE *pass_timing_file = nullptr;
++
+ } // namespace
+ 
++PassTimingReadback::~PassTimingReadback() {
++  unsigned n = (unsigned)labels_.size();
++  if (!n)
++    return;
++  std::vector<uint64_t> ticks(n);
++  sample_buffer_.resolveCounterRange(0, n, ticks.data(), n * sizeof(uint64_t));
++  std::lock_guard<std::mutex> lock(pass_timing_mutex);
++  if (!pass_timing_file) {
++    auto path = env::getEnvVar("DXMT_PASS_TIMING");
++    pass_timing_file = std::fopen(path.c_str(), "a");
++    if (!pass_timing_file)
++      return;
++  }
++  // the command buffer's own GPU start and end (ns) calibrate the sample ticks
++  std::fprintf(pass_timing_file, "CB %llu %llu %llu %llu %u\n", (unsigned long long)frame_, (unsigned long long)seq_,
++               (unsigned long long)cmdbuf_.gpuStartTime(), (unsigned long long)cmdbuf_.gpuEndTime(), n);
++  for (unsigned i = 0; i < n; i++)
++    std::fprintf(pass_timing_file, "P %llu %llu %u %llu %s\n", (unsigned long long)frame_, (unsigned long long)seq_, i,
++                 (unsigned long long)ticks[i], labels_[i].c_str());
++  std::fflush(pass_timing_file);
++}
++
+ void
+ bench_register_pipeline(obj_handle_t pso, const std::string &tag) {
+   std::lock_guard<std::mutex> lock(bench_pipeline_mutex);
+@@ -1005,8 +1061,40 @@
+ 
+   readbacks.timestamp = timestamp_state_.flush(cmdbuf);
+ 
++  if (pass_timing && encoder_count)
++    readbacks.pass_timing = std::make_unique<PassTimingReadback>(
++        device_, cmdbuf, bench_label_frame, seqId, std::min(encoder_count + 1, PassTimingReadback::kMaxSamples)
++    );
++  auto pass_timing_sample = [&](const char *kind) {
++    auto timing = readbacks.pass_timing.get();
++    unsigned index = timing ? timing->next() : ~0u;
++    if (index == ~0u)
++      return;
++    if (pass_timing_barrier)
++      barrierOnQueue(cmdbuf);
++    WMTSampleBufferAttachmentInfo sample_buffer_info{};
++    sample_buffer_info.sample_buffer = timing->sampleBuffer();
++    sample_buffer_info.start_of_encoder_sample_index = index;
++    sample_buffer_info.end_of_encoder_sample_index = ~0ull; /* MTLCounterDontSample */
++    auto encoder = cmdbuf.blitCommandEncoderWithSampleBuffers(&sample_buffer_info, 1);
++    struct wmtcmd_blit_fillbuffer fill; // a blit pass samples only when it isn't empty
++    fill.next.set(nullptr);
++    fill.type = WMTBlitCommandFillBuffer;
++    fill.buffer = dummy_cbuffer_;
++    fill.offset = 0;
++    fill.length = 4;
++    fill.value = 0;
++    MTLBlitCommandEncoder_encodeCommands(encoder, (const struct wmtcmd_base *)&fill);
++    encoder.endEncoding();
++    timing->labels_.push_back(kind);
++  };
++  bench_label_sink = readbacks.pass_timing ? &readbacks.pass_timing->labels_ : nullptr;
++
+   while (encoder_index) {
+     auto current = encoders[encoder_count - encoder_index];
++    if (readbacks.pass_timing)
++      if (auto kind = pass_timing_kind(current->type))
++        pass_timing_sample(kind);
+     switch (current->type) {
+     case EncoderType::Render: {
+       auto data = static_cast<RenderEncoderData *>(current);
+@@ -1383,6 +1471,9 @@
+     }
+     encoder_index--;
+   }
++  if (readbacks.pass_timing)
++    pass_timing_sample("end");
++  bench_label_sink = nullptr;
+   encoder_head.next = nullptr;
+   encoder_last = &encoder_head;
+   encoder_count_ = 0;
+--- a/src/dxmt/dxmt_command_queue.cpp
++++ b/src/dxmt/dxmt_command_queue.cpp
+@@ -61,6 +61,10 @@
+   if (env::getEnvVar("DXMT_BENCH") == "1")
+     gpu_timing_.reset(new FrameGpuTiming[kGpuTimingRing]);
+   argument_encoding_ctx.bench_labels = env::getEnvVar("DXMT_BENCH_LABELS") == "1";
++  argument_encoding_ctx.pass_timing = !env::getEnvVar("DXMT_PASS_TIMING").empty();
++  argument_encoding_ctx.pass_timing_barrier = env::getEnvVar("DXMT_PASS_TIMING_BARRIER") == "1";
++  if (argument_encoding_ctx.pass_timing)
++    argument_encoding_ctx.bench_labels = true;
+   pacing_enabled_ = Config::getInstance().getOption<bool>("dxgi.presentPacing", false);
+   pacing_target_us_ = std::clamp(Config::getInstance().getOption<int>("dxgi.presentPacingTargetUs", 1000), 0, 8000);
+   pacing_max_us_ = std::clamp(Config::getInstance().getOption<int>("dxgi.presentPacingMaxUs", 8000), 0, 30000);
