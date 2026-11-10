@@ -89,25 +89,13 @@ the process restarts and its last, half-drawn frame stays on screen.
 - Logged descriptions are cut to 600 characters: Wine's debug output takes
   lines of about 1,000 bytes.
 
-`dxmt-stream-output.patch` (stream output through a pass-through geometry shader).
-Overwatch fills the buffer behind many particle effects (Ana's sleep, Sombra's
-hack on health packs, mythic and other skin effects, highlight intros) by drawing
-points with one geometry shader that passes them through unchanged, with stream
-output and nothing rasterized. DXMT dropped every such draw, so the effects drew
-from stale data and flickered. In a Mystery Heroes match the game draws with it
-about 74 times a second.
-- DXMT emulates stream output in the vertex shader. A geometry shader now
-  qualifies when it takes points and passes them through: only moves and emits,
-  no resources, and each output an input with the same register and semantic.
-  The shader's reflection keeps that last check's result, which DXMT computed but
-  discarded. The stream-output elements are then looked up in its input
-  signature, which is its output.
-- A draw whose only output is stream output gets a render pass without
-  attachments instead of being dropped.
-- Point-list draws append from the offset `SOSetTargets` gave, and an instanced
-  draw writes instance after instance: the shader gets the vertices per instance
-  in the stream-output table's unused second field. A draw that would run past the
-  buffer is skipped.
+`dxmt-stream-output.patch` fixes flickering particle effects (Ana's sleep, Sombra's
+hack, mythic skins, highlight intros). Overwatch builds them with stream output
+through a geometry shader that passes points through unchanged, and DXMT dropped
+every such draw. DXMT's vertex-shader emulation of stream output now takes such a
+shader (DXMT's own pass-through checks, kept in the shader's reflection), a draw
+whose only output is stream output gets a pass without attachments, and point
+draws append instance after instance and draw after draw, as D3D does.
 
 ## Wine
 

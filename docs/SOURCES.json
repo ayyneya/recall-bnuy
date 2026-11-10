@@ -37,7 +37,7 @@
     },
     {
      "patch": "patches/dxmt-stream-output.patch",
-     "sha256": "8aed938478797e95d6d9d07c1392ac6b369fa39f90e3027c216274633d24be00",
+     "sha256": "a1039beae4b77b52da89749030fdd58e7ac65389d38cfd155f1e7ddef232a4bd",
      "applies_after": "patches/dxmt-gpu-errors.patch"
     }
    ],
