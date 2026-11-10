@@ -79,14 +79,10 @@ def prepare_source(work):
     check=subprocess.run(['git','apply','--check',str(gpu_errors)],cwd=source,capture_output=True)
     if check.returncode==0:run('git','apply',gpu_errors,cwd=source)
     else:run('git','apply','--reverse','--check',gpu_errors,cwd=source)
-    # Stream output from a point pass-through geometry shader: Overwatch fills the buffer behind many
-    # particle effects (Ana's sleep, Sombra's hack, mythic skins, highlight intros) through one. DXMT
-    # emulates it as the vertex shader's stream output: it reads the geometry shader's OSG5 output
-    # signature, draws without an attachment, writes instanced draws instance after instance and
-    # appends draw after draw, as D3D does. Without it every such draw was dropped and the effects
-    # flickered.
+    # Stream output through a point pass-through geometry shader, which Overwatch uses for the buffer
+    # behind many particle effects: every such draw was dropped and the effects flickered.
     stream_output=ROOT/'patches/dxmt-stream-output.patch'
-    if hashlib.sha256(stream_output.read_bytes()).hexdigest()!='ffe0a00413b45a9498063b331ad283816e8a70523e085da7fb777e80ae2c9fda':raise ValueError('Accepted stream output patch changed')
+    if hashlib.sha256(stream_output.read_bytes()).hexdigest()!='8aed938478797e95d6d9d07c1392ac6b369fa39f90e3027c216274633d24be00':raise ValueError('Accepted stream output patch changed')
     check=subprocess.run(['git','apply','--check',str(stream_output)],cwd=source,capture_output=True)
     if check.returncode==0:run('git','apply',stream_output,cwd=source)
     else:run('git','apply','--reverse','--check',stream_output,cwd=source)

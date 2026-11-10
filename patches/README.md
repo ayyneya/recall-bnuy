@@ -89,26 +89,25 @@ the process restarts and its last, half-drawn frame stays on screen.
 - Logged descriptions are cut to 600 characters: Wine's debug output takes
   lines of about 1,000 bytes.
 
-`dxmt-stream-output.patch` fixes flickering particle effects: Ana's sleep, Sombra's
-hack on health packs, mythic and other skin effects such as the Voidwalker black
-holes, and highlight intros such as Counting Sheep. Overwatch fills the buffer
-behind these effects through one geometry shader with stream output, a point
-pass-through (one point in, the same point out), and DXMT dropped every draw with
-it, so the effects drew from stale data. In a Mystery Heroes match the game drew
-with it every second, about 74 times a second.
-- A geometry shader that only passes each point through (point list in and out,
-  at most one vertex, each output copied unchanged from the same input register)
-  is emulated as the vertex shader's stream output, which DXMT already supports:
-  its output signature is read from `OSG5`, the format geometry shaders use, for
-  stream 0. Other geometry shaders are handled as before.
-- A draw whose only output is a stream-output buffer (no render target, depth
-  buffer or UAV bound) gets a render pass without attachments, sized to the
-  viewport, instead of being dropped.
-- An instanced draw writes its vertices instance after instance, as D3D does:
-  the shader is told the vertices per instance, and the variant's cache key
-  changes so no earlier compile of it is used.
-- Point-list draws append to the buffer draw after draw from the offset given to
-  `SOSetTargets`, and a draw that would run past the buffer's end is skipped.
+`dxmt-stream-output.patch` (stream output through a pass-through geometry shader).
+Overwatch fills the buffer behind many particle effects (Ana's sleep, Sombra's
+hack on health packs, mythic and other skin effects, highlight intros) by drawing
+points with one geometry shader that passes them through unchanged, with stream
+output and nothing rasterized. DXMT dropped every such draw, so the effects drew
+from stale data and flickered. In a Mystery Heroes match the game draws with it
+about 74 times a second.
+- DXMT emulates stream output in the vertex shader. A geometry shader now
+  qualifies when it takes points and passes them through: only moves and emits,
+  no resources, and each output an input with the same register and semantic.
+  The shader's reflection keeps that last check's result, which DXMT computed but
+  discarded. The stream-output elements are then looked up in its input
+  signature, which is its output.
+- A draw whose only output is stream output gets a render pass without
+  attachments instead of being dropped.
+- Point-list draws append from the offset `SOSetTargets` gave, and an instanced
+  draw writes instance after instance: the shader gets the vertices per instance
+  in the stream-output table's unused second field. A draw that would run past the
+  buffer is skipped.
 
 ## Wine
 
