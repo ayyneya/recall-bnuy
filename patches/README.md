@@ -89,6 +89,27 @@ the process restarts and its last, half-drawn frame stays on screen.
 - Logged descriptions are cut to 600 characters: Wine's debug output takes
   lines of about 1,000 bytes.
 
+`dxmt-stream-output.patch` fixes flickering particle effects: Ana's sleep, Sombra's
+hack on health packs, mythic and other skin effects such as the Voidwalker black
+holes, and highlight intros such as Counting Sheep. Overwatch fills the buffer
+behind these effects through one geometry shader with stream output, a point
+pass-through (one point in, the same point out), and DXMT dropped every draw with
+it, so the effects drew from stale data. In a Mystery Heroes match the game drew
+with it every second, about 74 times a second.
+- A geometry shader that only passes each point through (point list in and out,
+  at most one vertex, each output copied unchanged from the same input register)
+  is emulated as the vertex shader's stream output, which DXMT already supports:
+  its output signature is read from `OSG5`, the format geometry shaders use, for
+  stream 0. Other geometry shaders are handled as before.
+- A draw whose only output is a stream-output buffer (no render target, depth
+  buffer or UAV bound) gets a render pass without attachments, sized to the
+  viewport, instead of being dropped.
+- An instanced draw writes its vertices instance after instance, as D3D does:
+  the shader is told the vertices per instance, and the variant's cache key
+  changes so no earlier compile of it is used.
+- Point-list draws append to the buffer draw after draw from the offset given to
+  `SOSetTargets`, and a draw that would run past the buffer's end is skipped.
+
 ## Wine
 
 These apply to the `sources/wine` subtree of the

@@ -1,0 +1,354 @@
+diff --git a/src/airconv/air_type.cpp b/src/airconv/air_type.cpp
+index 01fb51b..8f53d60 100644
+--- a/src/airconv/air_type.cpp
++++ b/src/airconv/air_type.cpp
+@@ -64,7 +64,7 @@ AirType::AirType(LLVMContext &context) : context(context) {
+     context,
+     {
+       _int->getPointerTo((uint32_t)AddressSpace::device),
+-      _int->getPointerTo((uint32_t)AddressSpace::device),
++      _long, // Recall: vertices per instance of an instanced draw (0: not instanced)
+     },
+     "dxmt_stream_output_buffer_entry"
+   );
+diff --git a/src/airconv/dxbc_converter.cpp b/src/airconv/dxbc_converter.cpp
+index 4b1387b..ee87aa3 100644
+--- a/src/airconv/dxbc_converter.cpp
++++ b/src/airconv/dxbc_converter.cpp
+@@ -661,7 +661,14 @@ llvm::Error convert_dxbc_vertex_shader(
+       auto slot0_entry =
+           builder.CreateLoad(so_entries_type, builder.CreateConstInBoundsGEP1_32(so_entries_type, so_entries, 0));
+       auto slot0 = builder.CreateExtractValue(slot0_entry, {0});
+-      auto adjusted_vertex_id = builder.CreateSub(vertex_id, base_vertex);
++      // Recall: D3D writes an instanced draw's vertices instance after instance. The second field
++      // holds the draw's vertices per instance (0 when the draw is not instanced).
++      auto vertices_per_instance =
++          builder.CreateTrunc(builder.CreateExtractValue(slot0_entry, {1}), ctx.types._int);
++      auto adjusted_vertex_id = builder.CreateAdd(
++          builder.CreateSub(vertex_id, base_vertex),
++          builder.CreateMul(ctx.resource.instance_id, vertices_per_instance)
++      );
+       auto output_regs = builder.CreateBitOrPointerCast(
+         ctx.resource.output.ptr_int4, llvm::PointerType::get(ctx.types._int, 0)
+       );
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index b203443..0566c53 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1281,6 +1281,8 @@ public:
+     if (unlikely(!VertexCount))
+       return;
+     std::lock_guard<mutex_t> lock(mutex);
++    if (unlikely(!PrepareEmulatedPointStreamOutput(VertexCount, 1, StartVertexLocation, false)))
++      return;
+ 
+     WMTPrimitiveType Primitive;
+     uint32_t ControlPointCount;
+@@ -1357,6 +1359,8 @@ public:
+     if (unlikely(!VertexCountPerInstance || !InstanceCount))
+       return;
+     std::lock_guard<mutex_t> lock(mutex);
++    if (unlikely(!PrepareEmulatedPointStreamOutput(VertexCountPerInstance, InstanceCount, StartVertexLocation, true)))
++      return;
+ 
+     WMTPrimitiveType Primitive;
+     uint32_t ControlPointCount;
+@@ -2246,6 +2250,14 @@ public:
+ 
+     if (!ValidateMultiSOTargets(NumBuffers, ppSOTargets))
+       return;
++    // Recall: an explicit offset starts appending there; -1 keeps appending where it was.
++    {
++      UINT offset0 = (NumBuffers && pOffsets) ? pOffsets[0] : 0;
++      if (!NumBuffers || !ppSOTargets || !ppSOTargets[0] || offset0 != UINT(-1)) {
++        so_append_base_ = (NumBuffers && ppSOTargets && ppSOTargets[0]) ? offset0 : 0;
++        so_append_bytes_ = 0;
++      }
++    }
+ 
+     for (unsigned slot = 0; slot < D3D11_SO_BUFFER_SLOT_COUNT; slot++) {
+       auto pBuffer = slot < NumBuffers ? GetResourceCommon(ppSOTargets[slot]) : nullptr;
+@@ -3274,6 +3286,44 @@ public:
+   GetDynamicBufferAllocation(Rc<DynamicBuffer> &dynamic);
+ 
+   uint64_t *allocated_encoder_argbuf_size_ = nullptr;
++  // Recall: D3D appends stream output draw after draw from the offset given to SOSetTargets.
++  // DXMT's emulation writes from the bound offset, so each emulated point draw moves it along.
++  uint64_t so_append_base_ = 0, so_append_bytes_ = 0;
++
++  /**
++  Before a non-indexed draw: when stream output is emulated for a point list (the vertex shader's
++  output, via a pass-through geometry shader), bind slot 0 at the append position and tell the
++  shader the vertices per instance. Returns false, skipping the draw, when its output would run past
++  the end of the buffer, where D3D stops writing.
++  */
++  bool
++  PrepareEmulatedPointStreamOutput(UINT VertexCount, UINT InstanceCount, UINT StartVertex, bool Instanced) {
++    if (likely(!state_.StreamOutput.Targets.test_bound(0)))
++      return true;
++    if (state_.InputAssembler.Topology != D3D11_PRIMITIVE_TOPOLOGY_POINTLIST || StartVertex != 0)
++      return true;
++    auto so = com_cast<IMTLD3D11StreamOutputLayout>(state_.ShaderStages[PipelineStage::Geometry].Shader.ptr());
++    if (!so)
++      return true;
++    MTL_SHADER_STREAM_OUTPUT_ELEMENT_DESC *elements;
++    uint32_t strides[4] = {};
++    so->GetStreamOutputElements(&elements, strides);
++    if (!strides[0])
++      return true;
++    uint64_t size = (uint64_t)VertexCount * InstanceCount * strides[0];
++    uint64_t at = so_append_base_ + so_append_bytes_;
++    uint64_t capacity = state_.StreamOutput.Targets[0].Buffer->buffer()->length();
++    if (at + size > capacity)
++      return false;
++    so_append_bytes_ += size;
++    unsigned vertices = Instanced ? VertexCount : 0;
++    EmitST([at = (unsigned)at, vertices](ArgumentEncodingContext &enc) {
++      enc.bindStreamOutputBufferOffset(0, at);
++      enc.setStreamOutputVerticesPerInstance(vertices);
++    });
++    state_.StreamOutput.Targets.set_dirty(0);
++    return true;
++  }
+ 
+   uint64_t PreAllocateArgumentBuffer(size_t size, size_t alignment) {
+     assert(allocated_encoder_argbuf_size_ && "otherwise invalid call");
+@@ -4483,6 +4533,15 @@ public:
+         dsv_info.viewId = state_.OutputMerger.DSV->viewId();
+         dsv_info.PixelFormat = state_.OutputMerger.DSV->pixelFormat();
+         dsv_info.ReadOnlyFlags =  state_.OutputMerger.DSV->readonlyFlags();
++      } else if (effective_render_target == 0 && !state_.OutputMerger.UAVs.any_bound() &&
++                 state_.StreamOutput.Targets.any_bound()) {
++        // Recall: a stream-output-only pass (no rasterization) draws into no attachment.
++        auto &viewport = state_.Rasterizer.viewports[0];
++        bool sized = state_.Rasterizer.NumViewports && viewport.Width >= 1 && viewport.Height >= 1;
++        render_target_width = sized ? viewport.Width : 1;
++        render_target_height = sized ? viewport.Height : 1;
++        sample_count = 1;
++        uav_only = true;
+       } else if (effective_render_target == 0) {
+         if (!state_.OutputMerger.UAVs.any_bound()) {
+           DEBUG("No rendering attachment or uav is bounded");
+diff --git a/src/d3d11/d3d11_input_layout.cpp b/src/d3d11/d3d11_input_layout.cpp
+index 8c03b2b..91f0116 100644
+--- a/src/d3d11/d3d11_input_layout.cpp
++++ b/src/d3d11/d3d11_input_layout.cpp
+@@ -7,6 +7,8 @@
+ #include "sha1/sha1_util.hpp"
+ #include "util_math.hpp"
+ #include "log/log.hpp"
++#include <algorithm>
++#include <cstring>
+ 
+ namespace dxmt {
+ 
+@@ -175,6 +177,128 @@ private:
+   NullGeometryShader null_gs;
+ };
+ 
++/**
++Recall: true when BYTECODE is a geometry shader that only passes each point through: point list in,
++point list out, at most one vertex, and every instruction a plain `mov o[N], v[0][N]` (same register,
++same components, no modifiers) before one emit. Stream output from such a shader is the vertex
++shader's own output, which the vertex stream-output emulation produces. Overwatch uses one for
++particle effects (Ana's sleep, Sombra's hack, mythic and Voidwalker skins, highlight intros).
++*/
++static bool
++IsPointPassThroughGeometryShader(const void *pShaderBytecode) {
++  auto p = (const uint8_t *)pShaderBytecode;
++  if (!p || memcmp(p, "DXBC", 4))
++    return false;
++  uint32_t total, count;
++  memcpy(&total, p + 24, 4);
++  memcpy(&count, p + 28, 4);
++  const uint32_t *code = nullptr;
++  uint32_t code_dwords = 0;
++  for (uint32_t i = 0; i < count && 32 + 4 * (i + 1) <= total; i++) {
++    uint32_t offset, size;
++    memcpy(&offset, p + 32 + 4 * i, 4);
++    if (offset + 8 > total)
++      return false;
++    memcpy(&size, p + offset + 4, 4);
++    if (offset + 8 + size > total)
++      return false;
++    if (!memcmp(p + offset, "SHDR", 4) || !memcmp(p + offset, "SHEX", 4)) {
++      code = (const uint32_t *)(p + offset + 8);
++      code_dwords = size / 4;
++    }
++  }
++  if (!code || code_dwords < 2 || (code[0] >> 16) != 2 /* geometry */)
++    return false;
++  uint32_t length = std::min(code[1], code_dwords);
++  uint32_t declared[32] = {}, written[32] = {};
++  bool point_in = false, point_out = false, one_vertex = false, emitted = false, returned = false;
++  for (uint32_t at = 2; at < length;) {
++    uint32_t token = code[at], opcode = token & 0x7ff, size = (token >> 24) & 0x7f;
++    if (opcode == 0x35 /* customdata */)
++      size = at + 1 < length ? code[at + 1] : 0;
++    if (!size || at + size > length || returned)
++      return false;
++    const uint32_t *op = code + at + 1;
++    switch (opcode) {
++    case 0x6a: // dcl_globalFlags
++    case 0x5f: // dcl_input
++    case 0x60: // dcl_input_siv
++    case 0x61: // dcl_input_sgv
++    case 0x68: // dcl_temps
++    case 0x35: // customdata (comments)
++      break;
++    case 0x8f: // dcl_stream m0
++      if (size != 3 || op[1] != 0)
++        return false;
++      break;
++    case 0x5d: // dcl_inputprimitive
++      point_in = ((token >> 11) & 0x3f) == 1;
++      break;
++    case 0x5c: // dcl_outputtopology
++      point_out = ((token >> 11) & 0x7f) == 1;
++      break;
++    case 0x5e: // dcl_maxvertexcount
++      one_vertex = size == 2 && op[0] == 1;
++      break;
++    case 0x65: // dcl_output
++    case 0x66: // dcl_output_sgv
++    case 0x67: // dcl_output_siv
++      // o[N] with a mask, one immediate index
++      if (size < 3 || ((op[0] >> 12) & 0xff) != 2 || ((op[0] >> 2) & 3) != 0 || (op[0] >> 31) || op[1] >= 32)
++        return false;
++      declared[op[1]] |= (op[0] >> 4) & 0xf;
++      break;
++    case 0x36: { // mov
++      if (emitted || (token & (1 << 13)) /* saturate */ || (token >> 31) || size != 6)
++        return false;
++      uint32_t dst = op[0], reg = op[1], src = op[2];
++      // dst: o[reg], 4 components, mask mode, 1D immediate index, no extended operand
++      if (((dst >> 12) & 0xff) != 2 || (dst & 3) != 2 || ((dst >> 2) & 3) != 0 || ((dst >> 20) & 3) != 1 ||
++          ((dst >> 22) & 7) != 0 || (dst >> 31) || reg >= 32)
++        return false;
++      // src: v[0][reg], 2D immediate indices, no extended operand (modifiers)
++      if (((src >> 12) & 0xff) != 1 || (src & 3) != 2 || ((src >> 20) & 3) != 2 || ((src >> 22) & 7) != 0 ||
++          ((src >> 25) & 7) != 0 || (src >> 31) || op[3] != 0 || op[4] != reg)
++        return false;
++      uint32_t mask = (dst >> 4) & 0xf, mode = (src >> 2) & 3;
++      for (uint32_t c = 0; c < 4; c++) {
++        if (!(mask & (1 << c)))
++          continue;
++        uint32_t from = mode == 0   ? c
++                        : mode == 1 ? (src >> (4 + 2 * c)) & 3
++                                    : (src >> 4) & 3;
++        if (from != c)
++          return false;
++      }
++      written[reg] |= mask;
++      break;
++    }
++    case 0x3f: // emit
++      if (emitted || size != 1)
++        return false;
++      emitted = true;
++      break;
++    case 0x75: // emit_stream m0
++      if (emitted || size != 3 || op[1] != 0)
++        return false;
++      emitted = true;
++      break;
++    case 0x3e: // ret
++      returned = true;
++      break;
++    default:
++      return false;
++    }
++    at += size;
++  }
++  if (!point_in || !point_out || !one_vertex || !emitted)
++    return false;
++  for (uint32_t reg = 0; reg < 32; reg++)
++    if ((declared[reg] & written[reg]) != declared[reg])
++      return false;
++  return true;
++}
++
+ HRESULT ExtractMTLStreamOutputElements(
+     MTLD3D11Device *pDevice, const void *pShaderBytecode, UINT NumEntries,
+     const D3D11_SO_DECLARATION_ENTRY *pEntries,
+@@ -184,12 +308,24 @@ HRESULT ExtractMTLStreamOutputElements(
+   std::array<uint32_t, 4> offsets = {{}};
+   uint32_t element_count = 0;
+   CSignatureParser parser;
++  CSignatureParser5 parser5;
++  const CSignatureParser *signature = &parser;
+   HRESULT hr = DXBCGetOutputSignature(pShaderBytecode, &parser);
+   if (FAILED(hr)) {
+-    return hr;
++    // Recall: a geometry shader's outputs are in OSG5, one signature per stream. Read stream 0
++    // only for a point pass-through, whose outputs are the vertex shader's own registers.
++    if (!IsPointPassThroughGeometryShader(pShaderBytecode))
++      return hr;
++    hr = DXBCGetOutputSignature(pShaderBytecode, &parser5);
++    if (FAILED(hr))
++      return hr;
++    if (parser5.NumStreams() == 0)
++      return E_FAIL;
++    signature = parser5.Signature(0);
++    WARN("Emulate stream output of a pass-through geometry shader");
+   }
+   const D3D11_SIGNATURE_PARAMETER *pParameters;
+-  auto numParameters = parser.GetParameters(&pParameters);
++  auto numParameters = signature->GetParameters(&pParameters);
+   for (unsigned i = 0; i < NumEntries; i++) {
+     auto entry = pEntries[i];
+     if (entry.Stream != 0) {
+diff --git a/src/d3d11/d3d11_shader.cpp b/src/d3d11/d3d11_shader.cpp
+index 285cbb9..5c8e0fb 100644
+--- a/src/d3d11/d3d11_shader.cpp
++++ b/src/d3d11/d3d11_shader.cpp
+@@ -412,6 +412,7 @@ CreateVariantShader(MTLD3D11Device *pDevice, ManagedShader shader,
+   Sha1HashState h;
+   h.update(getGlobalShaderFlag());
+   h.update(((IMTLD3D11StreamOutputLayout *)variant.stream_output_layout_handle)->Digest());
++  h.update(uint32_t(0x52534f32)); // Recall: instanced write index (cached variants before it differ)
+   if (variant.input_layout_handle)
+     h.update(variant.input_layout_handle->sha1());
+   auto variant_digest = h.final();
+diff --git a/src/dxmt/dxmt_context.cpp b/src/dxmt/dxmt_context.cpp
+index 3ab25fb..6585421 100644
+--- a/src/dxmt/dxmt_context.cpp
++++ b/src/dxmt/dxmt_context.cpp
+@@ -143,9 +143,11 @@ ArgumentEncodingContext::encodeStreamOutputBuffers<PipelineKind::Ordinary>(uint6
+       entries[slot].counter_handle = 0;
+       continue;
+     }
+-    auto [buffer_alloc, buffer_offset] = access<PipelineStage::Vertex>(buffer, state.offset, 0, ResourceAccess::Write);
+-    entries[slot].buffer_handle = buffer_alloc->gpuAddress() + buffer_offset + state.offset;
+-    entries[slot].counter_handle = 0; // TODO(stream-output): counter & buffer_filled_size
++    uint64_t so_offset = state.offset & 0xffffffffull; // Recall: upper half, see setStreamOutputVerticesPerInstance
++    auto [buffer_alloc, buffer_offset] = access<PipelineStage::Vertex>(buffer, so_offset, 0, ResourceAccess::Write);
++    entries[slot].buffer_handle = buffer_alloc->gpuAddress() + buffer_offset + so_offset;
++    // Recall: the shader reads this field as the draw's vertices per instance (no counter yet).
++    entries[slot].counter_handle = state.offset >> 32;
+     makeResident<PipelineStage::Vertex, PipelineKind::Ordinary>(buffer.ptr(), false, true);
+   };
+   {
+diff --git a/src/dxmt/dxmt_context.hpp b/src/dxmt/dxmt_context.hpp
+index ac5c664..c1567fa 100644
+--- a/src/dxmt/dxmt_context.hpp
++++ b/src/dxmt/dxmt_context.hpp
+@@ -488,7 +488,17 @@ public:
+   
+   void bindStreamOutputBufferOffset(unsigned slot, unsigned offset) {
+     auto &entry = so_[slot];
+-    entry.offset = offset;
++    entry.offset = (entry.offset & ~0xffffffffull) | offset; // keeps the vertices per instance
++  }
++
++  /**
++  Recall: the vertices per instance of an instanced draw with emulated stream output ride in the
++  upper half of the 64-bit offset (offsets stay below 4 GiB), so the binding's layout, which other
++  DXMT modules share, is unchanged. encodeStreamOutputBuffers splits them again.
++  */
++  void setStreamOutputVerticesPerInstance(unsigned vertices) {
++    for (auto &entry : so_)
++      entry.offset = (entry.offset & 0xffffffffull) | ((uint64_t)vertices << 32);
+   }
+ 
+   void
