@@ -24,7 +24,7 @@ index 15b51c1..cb7ea41 100644
  
  struct MTL_POST_TESSELLATOR_REFLECTION {
 diff --git a/src/airconv/dxbc_converter.cpp b/src/airconv/dxbc_converter.cpp
-index 4b1387b..68a216e 100644
+index 4b1387b..5227e9e 100644
 --- a/src/airconv/dxbc_converter.cpp
 +++ b/src/airconv/dxbc_converter.cpp
 @@ -661,7 +661,10 @@ llvm::Error convert_dxbc_vertex_shader(
@@ -39,7 +39,30 @@ index 4b1387b..68a216e 100644
        auto output_regs = builder.CreateBitOrPointerCast(
          ctx.resource.output.ptr_int4, llvm::PointerType::get(ctx.types._int, 0)
        );
-@@ -1299,8 +1302,9 @@ AIRCONV_API int SM50Initialize(
+@@ -902,8 +905,20 @@ llvm::Error convertDXBC(
+ bool CheckGSBBIsPassThrough(dxmt::dxbc::BasicBlock *bb) {
+   using namespace dxmt::dxbc;
+   if (bb->instructions.any(patterns{
+-        [](InstNop &) { return false; }, [](InstMov &mov) { return false; },
+-        [](InstEmit &) { return false; }, [](InstCut &) { return false; },
++        [](const InstNop &) { return false; },
++        [](const InstMov &mov) {
++          // only an input copied unchanged to the output with its register
++          auto dst = std::get_if<DstOperandOutput>(&mov.dst);
++          auto src = std::get_if<SrcOperandInputICP>(&mov.src);
++          if (mov._.saturate || !dst || !src || src->_.abs || src->_.neg || dst->regid != src->regid)
++            return true;
++          uint8_t swizzle[4] = {src->_.swizzle.x, src->_.swizzle.y, src->_.swizzle.z, src->_.swizzle.w};
++          for (uint8_t c = 0; c < 4; c++)
++            if ((dst->_.mask & (1 << c)) && swizzle[c] != c)
++              return true;
++          return false;
++        },
++        [](const InstEmit &) { return false; }, [](const InstCut &) { return false; },
+         [](auto &) { return true; }
+       }))
+     return false;
+@@ -1299,8 +1314,9 @@ AIRCONV_API int SM50Initialize(
            binding_srv_hi_mask || binding_srv_lo_mask ||
            !CheckGSBBIsPassThrough(sm50_shader->entry())) {
          pRefl->GeometryShader.GSPassThrough = ~0u;
