@@ -30,7 +30,7 @@ struct SetupView: View {
                         if model.screen == .launching && model.graphics.phase != nil { GraphicsDetails(progress:model.graphics) }
                     }.frame(maxWidth:LauncherStyle.contentWidth).padding(.top,model.screen == .welcome ? 28 : 34)
                     Spacer(minLength:28)
-                    Group { if model.showsDiscord { DiscordLink() } else { GitHubHelpLink() } }
+                    Group { if model.showsDiscord { DiscordHomePanel(studio:model.discord.studio,openSettings:model.screen == .moveApp ? nil : { model.settingsTab = .general;model.sheet = .settings }) } else { GitHubHelpLink() } }
                         .frame(maxWidth:LauncherStyle.contentWidth).padding(.bottom,supportPlacement == nil ? 20 : 14)
                     if let placement=supportPlacement {
                         SupportCard(placement:placement).frame(maxWidth:LauncherStyle.contentWidth).padding(.bottom,20)
@@ -42,6 +42,7 @@ struct SetupView: View {
                         FooterTile(title:L("About"),symbol:"info.circle") { model.sheet = .about }
                     }.frame(maxWidth:LauncherStyle.contentWidth).padding(.bottom,24)
                 }.padding(.horizontal,36).frame(maxWidth:.infinity).frame(minHeight:geometry.size.height)
+                .modifier(DiscordWindowFit())
             }.scrollIndicators(.hidden)
         }
         .background { LauncherBackground() }

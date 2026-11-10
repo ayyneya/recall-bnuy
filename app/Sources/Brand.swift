@@ -10,12 +10,14 @@ enum Brand {
     static var tagline:String { L("Making Overwatch playable on Apple Silicon.") }
     static let repositoryPath="AsherJN/recall"
     static let repository=URL(string:"https://github.com/\(repositoryPath)")!
-    static let releases=URL(string:"https://github.com/\(repositoryPath)/releases")!
-    static let issues=URL(string:"https://github.com/\(repositoryPath)/issues/new/choose")!
+    /// The fork this build is released from: updates and its pictures come from here, not Recall's own repository.
+    static let forkPath="ayyneya/recall"
+    static let releases=URL(string:"https://github.com/\(forkPath)/releases")!
+    static let issues=URL(string:"https://github.com/\(forkPath)/issues/new/choose")!
     /// GitHub's latest-release API for the repository. GitHub redirects a
     /// renamed repository, and the updater accepts any release disk image named
     /// "<anything>-<version>.dmg", so a later rename cannot strand an install.
-    static let releaseFeed=URL(string:"https://api.github.com/repos/\(repositoryPath)/releases/latest")!
+    static let releaseFeed=URL(string:"https://api.github.com/repos/\(forkPath)/releases/latest")!
     static func diskImage(_ version:String)->String { "\(name)-\(version).dmg" }
     /// The community server's permanent invite (unlimited uses); it lands in #start-here.
     /// Opens in the browser, which hands it to the Discord app when one is installed.

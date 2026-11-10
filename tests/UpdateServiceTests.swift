@@ -1,9 +1,9 @@
 import Foundation
 
 // Update check parsing and, with arguments, a real install: the app at argument 1
-// (a Developer ID copy standing in for the installed app, on a scratch volume) is
-// replaced from the disk image at argument 2, which must hold a newer notarized
-// build of the same app (version in argument 3). Never point it at /Applications.
+// (a signed copy standing in for the installed app, on a scratch volume) is
+// replaced from the disk image at argument 2, which must hold a newer build,
+// signed with the same certificate, of the same app (version in argument 3). Never point it at /Applications.
 @main struct UpdateServiceTests {
     static let notes="## What's new\n\n- **Faster.** Frames take less work.\n- See [the notes](https://example.com).\n\n## Install\n\n- Drag the app.\n"
     static func release(_ tag:String, assets:[[String:Any]], draft:Bool=false, prerelease:Bool=false, body:String=notes) -> Data {
@@ -21,6 +21,14 @@ import Foundation
         precondition(UpdateCheck.isNewer("1.0.1",than:"1.0.0") && UpdateCheck.isNewer("1.1",than:"1.0.9") && UpdateCheck.isNewer("2.0.0",than:"1.10.3"))
         precondition(!UpdateCheck.isNewer("1.0.0",than:"1.0.0") && !UpdateCheck.isNewer("1.0",than:"1.0.0") && !UpdateCheck.isNewer("0.1.6",than:"1.0.0"))
         precondition(!UpdateCheck.isNewer("1.0.1-beta",than:"1.0.0") && !UpdateCheck.isNewer("",than:"1.0.0") && !UpdateCheck.isNewer("1..2",than:"1.0"))
+        // The fork's versions: its updater reads the numbers, while Recall's copy rules still can't call one older.
+        precondition(UpdateCheck.number("1.6.3-discord") == "1.6.3.0" && UpdateCheck.number("1.6.3-discord.2") == "1.6.3.2" && UpdateCheck.number("1.6.3-bnuy.4") == "1.6.3.4" && UpdateCheck.number("1.6.4-bnuy") == "1.6.4.0" && UpdateCheck.number("1.6.3") == "1.6.3")
+        precondition(!UpdateCheck.isNewer("1.6.4",than:"1.6.3-discord"))
+        for (tag,current,offered) in [("v1.6.3-discord.2","1.6.3-discord",true),("v1.6.4-discord","1.6.3-discord.2",true),("v1.6.3-discord","1.6.3-discord",false),("v1.6.3-discord","1.6.3-discord.2",false),("v1.6.3-discord.3","1.6.3-discord.2",true),("v1.6.3-bnuy.4","1.6.3-discord.3",true),("v1.6.4-bnuy","1.6.3-bnuy.4",true),("v1.6.3-bnuy.4","1.6.3-bnuy.4",false)] {
+            let version=String(tag.dropFirst())
+            let found=try UpdateCheck.parse(release(tag,assets:[disk(version,name:"RecallBnuy")]),current:current,system:"26.6.2")
+            precondition((found != nil) == offered,tag)
+        }
         let found=try UpdateCheck.parse(release("v1.0.1",assets:[disk("1.0.1")]),current:"1.0.0")
         precondition(found?.version == "1.0.1" && found?.sha256 == String(repeating:"a",count:64) && found?.size == 242_000_000)
         precondition(found?.notes == ["Faster. Frames take less work.","See the notes."],"\(found?.notes ?? [])")
@@ -86,7 +94,7 @@ import Foundation
         guard args.count == 4 else { return }
         let installed=URL(fileURLWithPath:args[1]),image=URL(fileURLWithPath:args[2]),version=args[3]
         precondition(!installed.path.hasPrefix("/Applications"),"Use a scratch copy")
-        guard let team=UpdateInstaller.team(of:installed) else { fatalError("The stand-in app has no Developer ID signature") }
+        guard let team=UpdateInstaller.team(of:installed) else { fatalError("The stand-in app has no certificate") }
         let identifier=NSDictionary(contentsOf:installed.appendingPathComponent("Contents/Info.plist"))?["CFBundleIdentifier"] as! String
         let digest=try UpdateInstaller.sha256(of:image)
         let size=(try FileManager.default.attributesOfItem(atPath:image.path)[.size] as! NSNumber).int64Value
@@ -119,6 +127,6 @@ import Foundation
         }
         let leftovers=try FileManager.default.contentsOfDirectory(atPath:installed.deletingLastPathComponent().path).filter { $0.hasPrefix(".") && $0 != ".DS_Store" }
         precondition(leftovers.isEmpty,"Left behind: \(leftovers)")
-        print("PASS: real install from a notarized image; bad checksum, wrong version, other teams and newer macOS change nothing; \(reports.count) progress reports")
+        print("PASS: real install from a signed image; bad checksum, wrong version, other teams and newer macOS change nothing; \(reports.count) progress reports")
     }
 }

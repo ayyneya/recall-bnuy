@@ -1,0 +1,239 @@
+name: Release RecallBnuy
+# Follows every Recall release: merge it into discord-full, let Claude fix what the merge breaks, then publish.
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish (off is a dry run)
+        type: boolean
+        default: false
+      force:
+        description: Release even with no new Recall version (the next number, like 1.6.3-bnuy.4)
+        type: boolean
+        default: false
+concurrency:
+  group: fork-release
+permissions:
+  contents: write
+  issues: write
+env:
+  UPSTREAM: AsherJN/recall
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.look.outputs.tag }}
+      run: ${{ steps.look.outputs.run }}
+      fix: ${{ steps.look.outputs.fix }}
+    steps:
+      - id: look
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+          EVENT: ${{ github.event_name }}
+          LIVE: ${{ vars.FORK_RELEASES_LIVE }}
+        run: |
+          # Hourly runs stay off until the variable FORK_RELEASES_LIVE is true; a run started by hand always works.
+          if [ "$EVENT" = schedule ] && [ "$LIVE" != true ]; then exit 0; fi
+          tag=$(gh release view --repo "$UPSTREAM" --json tagName --jq .tagName)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          tags=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName')
+          out=$(echo "$tags" | grep "^$tag-" || true)
+          # A failed release waits for its issue to be closed, so it can't spend Claude's usage every hour.
+          stuck=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"Release failed: $tag\" in:title" --json number --jq length)
+          if [ "$FORCE" = true ] || { [ -z "$out" ] && [ "$stuck" = 0 ]; }; then echo "run=true" >> "$GITHUB_OUTPUT"; fi
+          if [ -n "$out" ]; then
+            last=$(echo "$out" | sed -E -n "s/^$tag-[a-z]+\.([0-9]+)$/\1/p" | sort -n | tail -1)
+            echo "fix=$((${last:-1}+1))" >> "$GITHUB_OUTPUT"
+          fi
+  # Holds no certificate and can't write to the repository: everything from the merge runs here.
+  build:
+    needs: check
+    if: needs.check.outputs.run == 'true'
+    runs-on: macos-26
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.check.outputs.tag }}
+    outputs:
+      version: ${{ steps.app.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: discord-full
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Merge the release
+        id: merge
+        run: |
+          cp .github/fork-release-claude.md "$RUNNER_TEMP/instructions.md"
+          # Claude's one way to run anything: the check, without its token, from a file it can't change.
+          printf '#!/bin/bash\ncd "%s"\nexec env -u CLAUDE_CODE_OAUTH_TOKEN bash scripts/fork_check.sh\n' "$PWD" > "$RUNNER_TEMP/fork-check"
+          sudo install -d /usr/local/bin
+          sudo install -o root -g wheel -m 0555 "$RUNNER_TEMP/fork-check" /usr/local/bin/fork-check
+          git config user.name neya
+          git config user.email 54977492+ayyneya@users.noreply.github.com
+          git fetch --no-tags "https://github.com/$UPSTREAM.git" "refs/tags/$TAG:refs/upstream/$TAG"
+          git diff "$(git merge-base HEAD "refs/upstream/$TAG")" "refs/upstream/$TAG" > fork-upstream.diff
+          git merge --no-edit -m "Merge Recall $TAG" "refs/upstream/$TAG" && echo "clean=true" >> "$GITHUB_OUTPUT" || echo "clean=false" >> "$GITHUB_OUTPUT"
+      - name: Check the merge
+        id: first
+        if: steps.merge.outputs.clean == 'true'
+        continue-on-error: true
+        run: bash scripts/fork_check.sh > fork-check.log 2>&1 || { tail -200 fork-check.log; exit 1; }
+      - name: Let Claude fix it
+        if: steps.merge.outputs.clean != 'true' || steps.first.outcome == 'failure'
+        timeout-minutes: 45
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude -p "$(cat "$RUNNER_TEMP/instructions.md")" \
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(/usr/local/bin/fork-check),Bash(git status),Bash(git diff),Bash(git rm:*)" \
+            --disallowedTools "Edit(.git/**),Edit(.github/**),Edit(scripts/fork_*),WebFetch,WebSearch"
+      - name: Commit any fixes
+        run: |
+          rm -f fork-check.log fork-upstream.diff
+          if git grep -n -E '^(<<<<<<<|>>>>>>>) ' -- app scripts tests docs; then exit 1; fi
+          git add -A
+          if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then git commit --no-edit
+          elif ! git diff --cached --quiet; then git commit -m "Fixes for Recall $TAG"; fi
+      - name: Final check
+        env:
+          FIRST: ${{ steps.first.outcome }}
+        run: |
+          # A first check that passed saw this exact code, since Claude only runs after a failure.
+          if [ "$FIRST" != success ]; then bash scripts/fork_check.sh; fi
+          python3 scripts/audit_public_source.py
+      - name: Build the app
+        id: app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIX: ${{ needs.check.outputs.fix }}
+        run: |
+          version=${TAG#v}-discord${FIX:+.$FIX}
+          python3 scripts/fork_release.py --tag "$TAG" --version "$version" --output "$RUNNER_TEMP/out"
+          git bundle create "$RUNNER_TEMP/out/merged.bundle" HEAD
+          tar -cf "$RUNNER_TEMP/build.tar" -C "$RUNNER_TEMP/out" RecallBnuy.app app.entitlements merged.bundle
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: ${{ runner.temp }}/build.tar
+          retention-days: 1
+          compression-level: 0
+  # Holds the certificate and can publish, so it runs no script from the repository, merged or not: everything it
+  # does is written here, in a file the job's own token can't change.
+  publish:
+    needs: [check, build]
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      TAG: ${{ needs.check.outputs.tag }}
+      VERSION: ${{ needs.build.outputs.version }}
+      PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: discord-full
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: ${{ runner.temp }}
+      - name: Refuse a merge that changes the release itself
+        run: |
+          mkdir "$RUNNER_TEMP/out"
+          tar -xf "$RUNNER_TEMP/build.tar" -C "$RUNNER_TEMP/out"
+          git fetch "$RUNNER_TEMP/out/merged.bundle" HEAD:refs/heads/merged
+          git merge-base --is-ancestor origin/discord-full merged
+          changed=$(git diff --name-only origin/discord-full merged -- .github/workflows .github/fork-release-claude.md scripts/fork_check.sh scripts/fork_release.py scripts/fork_certificate.sh)
+          if [ -n "$changed" ]; then echo "The merge changed: $changed"; exit 1; fi
+      - name: Sign and package
+        env:
+          P12: ${{ secrets.FORK_CERT_P12 }}
+          PASSWORD: ${{ secrets.FORK_CERT_PASSWORD }}
+        run: |
+          out=$RUNNER_TEMP/out
+          app=$out/RecallBnuy.app
+          [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION" ]
+          keychain=$RUNNER_TEMP/fork.keychain-db
+          lock=$(openssl rand -hex 16)
+          security create-keychain -p "$lock" "$keychain"
+          security set-keychain-settings "$keychain"
+          security unlock-keychain -p "$lock" "$keychain"
+          # codesign only finds an identity in a keychain on the search list, even when told which keychain to use.
+          security list-keychains -d user -s "$keychain"
+          printf %s "$P12" | base64 -D > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$PASSWORD" -T /usr/bin/codesign > /dev/null
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$lock" "$keychain" > /dev/null
+          # The certificate keeps the name it was made with: a new one would mean everyone reinstalls by hand.
+          identity=$(security find-identity -p codesigning "$keychain" | awk '/RecallDiscord/ {print $2; exit}')
+          sign=(codesign --force --timestamp=none --keychain "$keychain" --sign "$identity")
+          for item in ow2-setup ow2-pipeline libpipeline_prepare.dylib pipeline-prepare pipeline-warm "Rosetta Check.app"; do "${sign[@]}" "$app/Contents/Helpers/$item"; done
+          "${sign[@]}" --entitlements "$out/app.entitlements" "$app"
+          codesign --verify --deep --strict "$app"
+          security delete-keychain "$keychain"
+          mkdir "$RUNNER_TEMP/stage"
+          ditto "$app" "$RUNNER_TEMP/stage/RecallBnuy.app"
+          ln -s /Applications "$RUNNER_TEMP/stage/Applications"
+          image=RecallBnuy-$VERSION.dmg
+          hdiutil create -quiet -volname RecallBnuy -fs HFS+ -format UDZO -srcfolder "$RUNNER_TEMP/stage" "$out/$image"
+          (cd "$out" && shasum -a 256 "$image" > "$image.sha256")
+      - name: Publish
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out=$RUNNER_TEMP/out
+          git push "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" merged:discord-full
+          gh release view "$TAG" --repo "$UPSTREAM" --json body --jq .body > "$RUNNER_TEMP/recall.md"
+          last=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          {
+            [ "${last%%-*}" = "$TAG" ] || echo "- Updated to Recall ${TAG#v}"
+            git log --first-parent --no-merges --format='- %s' "$last..merged" -- app | grep -v '^- Fixes for Recall' || true
+          } > "$RUNNER_TEMP/changes.md"
+          [ -s "$RUNNER_TEMP/changes.md" ] || echo "- Small fixes" > "$RUNNER_TEMP/changes.md"
+          # The app shows the bullets under the first "What's new". Recall's notes stay whole except its own download's
+          # checksum, and names lose their @ so this release doesn't mention those people.
+          python3 - <<'NOTES'
+          import os,re
+          temp=os.environ["RUNNER_TEMP"];version=os.environ["TAG"][1:]
+          bare=lambda text:re.sub(r"(?<![\w`/.-])@(?=[A-Za-z0-9])","",text)
+          recall=re.sub(r"<details>\s*<summary>\s*Verify.*?</details>\s*","",open(f"{temp}/recall.md").read(),flags=re.S|re.I)
+          changes=open(f"{temp}/changes.md").read().strip()
+          open(f"{temp}/notes.md","w").write(f"""RecallBnuy: Recall {version} with bunni's changes, including the full Discord card. Unsigned: the first time, open it from System Settings › Privacy & Security › Open Anyway.
+
+          ## What's new
+
+          {bare(changes)}
+
+          ## From Recall {version}
+
+          <details>
+          <summary>Recall's release notes</summary>
+
+          {bare(recall).strip()}
+
+          </details>
+          """)
+          NOTES
+          gh release create "v$VERSION" "$out/RecallBnuy-$VERSION.dmg" "$out/RecallBnuy-$VERSION.dmg.sha256" --repo "$GITHUB_REPOSITORY" --target "$(git rev-parse merged)" --title "RecallBnuy $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --latest
+  report:
+    needs: [check, build, publish]
+    if: failure() && (github.event_name == 'schedule' || inputs.publish)
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Release failed: $TAG" --body "Nothing was published, and existing installs are fine. Close this issue to let the job try again. Run log: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

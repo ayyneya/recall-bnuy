@@ -18,9 +18,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'scripts'))
 import build_native_app  # noqa: E402
+import discord_translations  # noqa: E402
 
-SOURCES = sorted((ROOT/'app/Sources').glob('*.swift'))
+SOURCES = sorted((ROOT/'app/Sources').rglob('*.swift'))
 LANGUAGES = sorted((ROOT/'app/Resources/Localizations').glob('*.json'))
+LANGUAGES = discord_translations.merged(LANGUAGES)  # the Discord card's own table, merged in
 LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
 # Where a string reaches the screen: SwiftUI views and modifiers, AppKit menus and alerts, and
 # the app's own components and helpers that take on-screen text.
@@ -29,7 +31,7 @@ ON_SCREEN = re.compile(r'\b(?:Text|Button|Label|Link|Toggle|Picker)\(|\.help\(|\
                        r'|addButton\(withTitle:|NSMenuItem\(title:|NSMenu\(title:|\badd\(|\b(?:requirement|row|note|choice|paragraph|action)\(')
 # A literal right after one of these is a name for the computer, not text for the player. A
 # dictionary key or value is written "key":"value" (a ternary's branches have spaces: a : b).
-NOT_TEXT = re.compile(r'(?:\bL\(\s*|\b(?:verbatim|systemImage|symbol|systemName|forResource|withExtension|forKey|named|code|id):\s*|[=!]=\s*|\bcase\s+|":)$')
+NOT_TEXT = re.compile(r'(?:\bL\(\s*|\b(?:verbatim|systemImage|symbol|systemName|forResource|withExtension|forKey|named|code|id|context):\s*|[=!]=\s*|\bcase\s+|":)$')
 # A lowercase word assigned to a variable is a state's name ("report"), never text.
 STATE = re.compile(r'^[a-z][a-z0-9_-]*$')
 UNITS = {'ms', 'Hz', 'GB', 'MB', 'FPS'}
@@ -48,8 +50,11 @@ NOT_SCREEN_TEXT = {
     "OP_UPDATE for '' completed", 'Build marked non-playable for ', 'Adding server node', 'yyyy-MM-dd HH:mm:ss',
     # Wine's and Overwatch's log lines, which Save Logs (LogBundle) puts on its timeline.
     'wine: Unhandled', 'Unhandled exception', 'File read failed', 'Failed to read data from TACT',
+    # The voice chat lines Overwatch.log keeps, which the Discord card follows (DiscordPresence.swift).
+    'Notified Lobby of Active channel ', 'Auto-Join Enabled Flags ', 'Channel Enabled Flags ', 'Request join channel ',
     '**Crashing Thread**', 'Running Time:', 'Most Recent Logs:', 'Launch timer expired',
     'Cancel requested for active operation - OP_UPDATE', "OP_UPDATE for '' done Canceling", 'done Canceling',
+    'yyyy-MM-dd HH:mm',  # the times in What Recall remembers' export (CareerHistory.csv)
     # The graphics engine's GPU error lines (REC-76), which Save Logs puts on its timeline.
     'Device error at frame', 'MTLCommandBufferError code 4', '0x[0-9a-fA-F]+|[0-9a-fA-F]{8,}|(?<=frame )[0-9]+',
 }
@@ -57,6 +62,10 @@ NOT_SCREEN_TEXT = {
 OWN_SCRIPT = re.compile(r'[\u1100-\u11ff\u3130-\u318f\uac00-\ud7af\u4e00-\u9fff]')
 # A path ("Contents/Helpers/…", "/Library/…"), not a sentence.
 PATH = re.compile(r'^/|\S/\S')
+# An icon's name in Settings › Discord ("lucide:lock", "ph:sword-fill"), and the SVG it is drawn from
+# (DiscordDesign.swift): code, not text.
+ICON = re.compile(r'^[a-z0-9]+:[a-z0-9-]+$')
+MARKUP = re.compile(r'^>?<[a-z]+ ')
 
 
 def code_lines(path):
@@ -98,15 +107,17 @@ def decode(text):
 
 
 def keys():
-    """Every L("…") key in the app, with where it first appears."""
+    """Every L("…") key in the app, with where it first appears. L("Support", context:"role") is looked up as
+    "Support (role)" (the same English with another meaning)."""
     found = {}
     for path in SOURCES:
         for number, line in enumerate(code_lines(path), 1):
-            for match in re.finditer(r'\bL\(\s*' + LITERAL.pattern, line):
+            for match in re.finditer(r'\bL\(\s*' + LITERAL.pattern + r'(\s*,\s*context:\s*' + LITERAL.pattern + r')?', line):
                 text = match.group(1)
                 if '\\(' in text:
                     raise AssertionError(f'{path.name}:{number}: L() takes fixed text, with values as {{0}}: {text}')
-                found.setdefault(decode(text), f'{path.name}:{number}')
+                key = decode(text) + (f' ({decode(match.group(3))})' if match.group(2) else '')
+                found.setdefault(key, f'{path.name}:{number}')
     return found
 
 
@@ -174,6 +185,9 @@ class Translations(unittest.TestCase):
                         continue
                     if STATE.match(match.group(1)) and re.search(r'(?<![=!<>])=\s*$', before):
                         continue
+                    # An icon's name, or a dictionary's key (["details"]).
+                    if ICON.match(match.group(1)) or (STATE.match(match.group(1)) and before.endswith('[') and after.startswith(']')):
+                        continue
                     unwrapped.append(f'{path.name}:{number}: {match.group(1)[:80]}')
         self.assertEqual(unwrapped, [], 'on-screen text without L(); use Text(verbatim:) for names and codes')
 
@@ -192,7 +206,7 @@ class Translations(unittest.TestCase):
                     before, after = line[:match.start()], line[match.end():]
                     if NOT_TEXT.search(before) or after.startswith(':') or in_L_values(before):
                         continue
-                    if decode(text) in NOT_SCREEN_TEXT or OWN_SCRIPT.search(text) or PATH.search(text) or '\\"' in raw:
+                    if decode(text) in NOT_SCREEN_TEXT or OWN_SCRIPT.search(text) or PATH.search(text) or MARKUP.match(text) or '\\"' in raw:
                         continue
                     unwrapped.append(f'{path.name}:{number}: {raw[:80]}')
         self.assertEqual(unwrapped, [], 'sentences without L(); add them to NOT_SCREEN_TEXT only if they never reach the screen')

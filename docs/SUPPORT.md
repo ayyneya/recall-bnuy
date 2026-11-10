@@ -181,6 +181,38 @@ request carries no account, identifier or information about your Mac; like any
 web request it reaches GitHub from your IP address. Turn it off in Settings › General,
 and check by hand from the Recall menu.
 
+Discord activity (Settings › General's Discord card) lets your Discord profile
+show that you're playing Overwatch, with a Mac badge. Basic shows the game and
+how long; Live (the default) adds whether you're in the menus or a match and
+your group's voice count; Full and your own cards add your public career
+profile. Friends and servers you share see it; Discord's Activity Privacy
+setting hides it. Recall tells only the Discord app on your Mac, over its local
+connection, and reads only Overwatch's own log file; it links no account, and
+it's off with China's Battle.net. The power button turns it all off (no log, no
+Discord, no lookups). Of your Discord account Recall keeps a scrambled id on
+this Mac, so another account signed in here never gets your profile on its card.
+Settings' preview loads heroes, ranks and icons from Blizzard and Discord, and
+the home screen's invite counts from Discord at most once a day; none of these
+requests sends cookies or anything about you.
+
+With a BattleTag entered, Recall sends it, and nothing else, to OverFast
+(overfast-api.tekrop.fr), an open-source service that reads public career
+profiles: when Overwatch opens, about twelve minutes after it quits, and when
+you choose Look again, at most once in ten minutes. OverFast keeps the profiles
+it looks up. Your profile must be public (Overwatch: Options › Social › Career
+Profile Visibility). Settings › Discord › Your profile lists what is read and
+where it shows.
+
+What Recall remembers stays on your Mac, in Recall's Application Support folder:
+when you played, the matches the log counted and, with a BattleTag, how your
+profile changed after each session and each hero's hours. Settings › Discord ›
+What Recall remembers exports it or erases it (hold two seconds; Undo for ten
+seconds). Another player's profile sets the first one's aside until its
+BattleTag returns. Uninstalling moves it to the Trash with a copy of your cards
+(never the BattleTag). A shared card code holds only the card's choices and
+name. The support report says only whether the activity and a BattleTag are on,
+OverFast's last answer, which card is in use and how many of your own there are.
+
 The Mosaic News links in the app open in your browser with a tag naming the
 screen they came from (for example `utm_content=home`), so the author can see
 which placement works. Nothing else is added, and the app itself records

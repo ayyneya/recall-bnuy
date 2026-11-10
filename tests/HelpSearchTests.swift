@@ -4,7 +4,7 @@ import AppKit
 // question or its answer, questions first, ignoring case, accents, width, bold and curly quotes,
 // and Chinese and Korean as typed. Build with every app source but Main.swift, and run:
 //   mkdir -p runtime/phase-3/help-search-tests
-//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(ls app/Sources/*.swift | grep -v Main.swift) \
+//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(find app/Sources -name "*.swift" ! -name Main.swift) \
 //     tests/HelpSearchTests.swift -o runtime/phase-3/help-search-tests/help-search-tests
 //   runtime/phase-3/help-search-tests/help-search-tests
 // Main.swift's AppDelegate, for the one menu action the app's views name.

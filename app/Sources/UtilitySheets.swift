@@ -79,6 +79,8 @@ struct SettingsSheet:View {
         }.font(LauncherStyle.font(14)).padding(.horizontal,32).padding(.vertical,28)
             .frame(width:LauncherStyle.sheetWidth,height:LauncherStyle.largeSheetHeight)
             .tint(.primary).background { LauncherBackground() }
+            // Settings › Discord, opened from General's Discord card or the home screen (DiscordSettings.swift).
+            .discordPages(model.discord.studio,tab:model.settingsTab,uninstall:{ model.sheet = .uninstall },uninstalling:model.uninstall == .working)
             .onReceive(NotificationCenter.default.publisher(for:NSApplication.didChangeScreenParametersNotification)) { _ in
                 main=MainDisplay.current
                 model.refreshDisplay()
@@ -125,6 +127,7 @@ struct SettingsSheet:View {
             updates
             battleNet
             mouse
+            if model.showsDiscord { DiscordSettingsCard(studio:model.discord.studio) }
             if model.otherInstallation != nil { otherInstallation }
         case .display:
             display

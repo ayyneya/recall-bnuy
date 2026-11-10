@@ -36,6 +36,13 @@ enum UpdateCheck {
         for field in fields { guard let number=Int(field),number>=0 else { return nil };numbers.append(number) }
         return numbers
     }
+    /// The fork's "1.6.3-bnuy" or "1.6.3-bnuy.4", and its earlier "-discord" ones, as numbers to compare ("1.6.3.0", "1.6.3.4"). Only the updater
+    /// reads it this way: to Recall's copy rules the suffix never counts as older, so neither app trashes the other.
+    static func number(_ version:String) -> String {
+        guard let suffix=version.range(of:"-(discord|bnuy)",options:.regularExpression) else { return version }
+        let fix=version[suffix.upperBound...].dropFirst()
+        return version[..<suffix.lowerBound]+"."+(fix.isEmpty ? "0" : fix)
+    }
     /// Dotted numeric versions only; anything else never counts as newer.
     static func isNewer(_ candidate:String, than current:String) -> Bool {
         guard let a=parts(candidate),let b=parts(current) else { return false }
@@ -93,7 +100,7 @@ enum UpdateCheck {
         }
         if release["draft"] as? Bool == true || release["prerelease"] as? Bool == true { return nil }
         let version=tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
-        guard isNewer(version,than:current),runs(minimumMacOS(release["body"] as? String ?? ""),on:system) else { return nil }
+        guard isNewer(number(version),than:number(current)),runs(minimumMacOS(release["body"] as? String ?? ""),on:system) else { return nil }
         let assets=release["assets"] as? [[String:Any]] ?? []
         // This app's file name, or after a rename the one "<name>-<version>.dmg".
         let images=assets.filter { ($0["name"] as? String)?.hasSuffix("-\(version).dmg") == true }
@@ -125,9 +132,9 @@ enum UpdateCheck {
 }
 
 // Replaces this app with a verified newer copy, then relaunches it. The new app
-// must match GitHub's SHA-256, be notarized, carry this app's bundle identifier
-// and be signed by this app's own Developer ID team. Any failure leaves the
-// installed app untouched.
+// must match GitHub's SHA-256, carry this app's bundle identifier and be signed
+// with the certificate that signed this app (the fork's own, not Apple's: `team`
+// is that certificate's hash). Any failure leaves the installed app untouched.
 enum UpdateInstaller {
     static func team(of app:URL) -> String? {
         var code:SecStaticCode?
@@ -135,11 +142,12 @@ enum UpdateInstaller {
         var information:CFDictionary?
         guard SecCodeCopySigningInformation(code,SecCSFlags(rawValue:kSecCSSigningInformation),&information) == errSecSuccess,
               let values=information as? [String:Any] else { return nil }
-        return values[kSecCodeInfoTeamIdentifier as String] as? String
+        guard let leaf=(values[kSecCodeInfoCertificates as String] as? [SecCertificate])?.first else { return nil }
+        return Insecure.SHA1.hash(data:SecCertificateCopyData(leaf) as Data).map { String(format:"%02x",$0) }.joined()
     }
     static func verify(_ app:URL, team:String, identifier:String, version:String?, system:String=UpdateCheck.system) throws {
         var code:SecStaticCode?, requirement:SecRequirement?
-        let text="anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"\(team)\" and notarized"
+        let text="identifier \"\(identifier)\" and certificate leaf = H\"\(team)\""
         guard SecStaticCodeCreateWithPath(app as CFURL,[],&code) == errSecSuccess,let code,
               SecRequirementCreateWithString(text as CFString,[],&requirement) == errSecSuccess,let requirement else {
             throw SetupFailure(code:"update_signature_invalid")

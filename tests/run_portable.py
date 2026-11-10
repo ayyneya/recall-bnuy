@@ -16,6 +16,7 @@ PORTABLE_MODULES = (
     'test_summarize_frames', 'test_process_probe', 'test_summarize_display',
     'test_v1_finish', 'test_derive_runtime', 'test_pipeline_helper', 'test_localization',
 )
+PORTABLE_MODULES += ('test_discord',)  # the Discord card's suites and its hooks in Recall's files
 
 
 if __name__ == '__main__':

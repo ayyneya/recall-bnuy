@@ -33,12 +33,14 @@ def inspect_path(name):
         raise ValueError('Excluded/unsafe source path: ' + name)
 
 
-IMAGE_SUFFIXES = ('.png', '.icns', '.jpg', '.jpeg')
+# .woff2: the fonts reviewed artwork is drawn with (Noto Sans in Settings › Discord, SIL OFL; THIRD_PARTY_NOTICES.md).
+# .gif: the Discord card's moving Extra picture (Jetpack Cat), which Discord loads from the repository.
+IMAGE_SUFFIXES = ('.png', '.icns', '.jpg', '.jpeg', '.woff2', '.gif')
 IMAGE_LIMIT = 4 * 1024 * 1024
 
 
 def is_image_asset(name, data):
-    """Reviewed artwork under app/Resources is the only binary content allowed."""
+    """Reviewed artwork (and its fonts) under app/Resources is the only binary content allowed."""
     return (name.startswith('app/Resources/') and name.lower().endswith(IMAGE_SUFFIXES)
             and len(data) <= IMAGE_LIMIT)
 

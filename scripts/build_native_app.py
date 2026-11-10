@@ -15,6 +15,7 @@ import subprocess
 import tarfile
 import tempfile
 from build_portable_setup import MINIMUM_MACOS, build as build_setup
+import discord_translations
 from derive_runtime import archive_minimum, check_archive, format_macos, parse_macos
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -43,6 +44,7 @@ def localize(resources):
     (resources/'en.lproj/Localizable.strings').write_bytes(plistlib.dumps({},fmt=plistlib.FMT_BINARY))
     for source in sorted(LOCALIZATIONS.glob('*.json')):
         table=json.loads(source.read_text())
+        table=discord_translations.merge(source,table)  # the Discord card's own table (scripts/discord_translations.py)
         folder=resources/(source.stem+'.lproj');folder.mkdir()
         (folder/'Localizable.strings').write_bytes(plistlib.dumps(table['Localizable'],fmt=plistlib.FMT_BINARY))
         info={key:table['InfoPlist'][english] for key,english in INFO_STRINGS.items() if english in table['InfoPlist']}
@@ -90,7 +92,7 @@ def build(output,workspace,runtime_archive,icon=None,identity=None,preview=False
     for directory in (helpers,resources,macos):directory.mkdir(parents=True)
     build_setup(helpers/'ow2-setup',ROOT/'runtime/toolchains/libarchive-3.7.7')
     shutil.move(helpers/'ow2-setup.build.json',output.parent/'worker-build.json')
-    run('/usr/bin/swiftc','-file-prefix-map',str(ROOT)+'=/ow2-source','-O','-target','arm64-apple-macos'+MINIMUM_MACOS,'-parse-as-library',*sorted((ROOT/'app/Sources').glob('*.swift')),'-o',macos/APP_NAME)
+    run('/usr/bin/swiftc','-file-prefix-map',str(ROOT)+'=/ow2-source','-O','-target','arm64-apple-macos'+MINIMUM_MACOS,'-parse-as-library',*sorted((ROOT/'app/Sources').rglob('*.swift')),'-o',macos/APP_NAME)
     run('/usr/bin/swiftc','-file-prefix-map',str(ROOT)+'=/ow2-source','-O','-target','arm64-apple-macos'+MINIMUM_MACOS,ROOT/'scripts/portable_pipeline.swift','-o',helpers/'ow2-pipeline')
     run('/usr/bin/clang','-ffile-prefix-map='+str(ROOT)+'=/ow2-source','-arch','x86_64','-mmacosx-version-min='+MINIMUM_MACOS,'-x','objective-c','-fblocks','-fno-objc-arc','-DDXMT_PIPELINE_CACHE_OFFLINE_TOOL','-O2','-dynamiclib',native/'pipeline_recipe.c',native/'pipeline_cache.c','-framework','Foundation','-framework','Metal','-framework','QuartzCore','-install_name','@rpath/libpipeline_prepare.dylib','-o',helpers/'libpipeline_prepare.dylib')
     run('/usr/bin/clang','-ffile-prefix-map='+str(ROOT)+'=/ow2-source','-arch','x86_64','-mmacosx-version-min='+MINIMUM_MACOS,'-x','objective-c','-fblocks','-fobjc-arc','-DDXMT_PIPELINE_CACHE_OFFLINE_TOOL','-O2','-I',native,ROOT/'scripts/pipeline_prepare.m','-x','none',helpers/'libpipeline_prepare.dylib','-Wl,-rpath,@executable_path','-framework','Foundation','-framework','Metal','-o',helpers/'pipeline-prepare')
@@ -118,8 +120,11 @@ def build(output,workspace,runtime_archive,icon=None,identity=None,preview=False
     shutil.copy2(ROOT/'licenses/PROJECT-NOTICE',resources/'NOTICE.txt')
     shutil.copy2(ROOT/'licenses/GITHUB-MARK-NOTICE.txt',resources/'GITHUB-MARK-NOTICE.txt')
     shutil.copy2(ROOT/'licenses/PROJECT-LINKS-NOTICE.txt',resources/'PROJECT-LINKS-NOTICE.txt')
+    shutil.copy2(ROOT/'licenses/NOTO-SANS-OFL.txt',resources/'NOTO-SANS-OFL.txt')
+    shutil.copy2(ROOT/'licenses/DESIGN-ICONS-NOTICE.txt',resources/'DESIGN-ICONS-NOTICE.txt')
     for name in RESOURCES:
         shutil.copy2(ROOT/'app/Resources'/name,resources/name)
+    for path in sorted((ROOT/'app/Resources/Discord').glob('*.*')):shutil.copy2(path,resources/path.name)  # the Discord feature's pictures, fonts and icons
     languages=localize(resources)
     if icon:shutil.copy2(icon,resources/'AppIcon.icns')
     else:

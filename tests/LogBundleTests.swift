@@ -4,7 +4,7 @@ import AppKit
 // personal detail the check of real logs found, with Recall's, Battle.net's and Overwatch's logs as they
 // write them. Build with every app source but Main.swift, and run:
 //   mkdir -p runtime/phase-3/log-tests
-//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(ls app/Sources/*.swift | grep -v Main.swift) \
+//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(find app/Sources -name "*.swift" ! -name Main.swift) \
 //     tests/LogBundleTests.swift -o runtime/phase-3/log-tests/log-bundle-tests
 //   runtime/phase-3/log-tests/log-bundle-tests
 // With --real <data folder> <zip> it saves that folder's logs, as the app would on this Mac.
