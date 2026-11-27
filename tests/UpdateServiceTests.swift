@@ -22,11 +22,11 @@ import Foundation
         precondition(!UpdateCheck.isNewer("1.0.0",than:"1.0.0") && !UpdateCheck.isNewer("1.0",than:"1.0.0") && !UpdateCheck.isNewer("0.1.6",than:"1.0.0"))
         precondition(!UpdateCheck.isNewer("1.0.1-beta",than:"1.0.0") && !UpdateCheck.isNewer("",than:"1.0.0") && !UpdateCheck.isNewer("1..2",than:"1.0"))
         // The fork's versions: its updater reads the numbers, while Recall's copy rules still can't call one older.
-        precondition(UpdateCheck.number("1.6.3-discord") == "1.6.3.0" && UpdateCheck.number("1.6.3-discord.2") == "1.6.3.2" && UpdateCheck.number("1.6.3-bnuy.4") == "1.6.3.4" && UpdateCheck.number("1.6.4-bnuy") == "1.6.4.0" && UpdateCheck.number("1.6.3") == "1.6.3")
+        precondition(UpdateCheck.number("1.6.3-discord") == "1.6.3.0" && UpdateCheck.number("1.6.3-discord.2") == "1.6.3.2" && UpdateCheck.number("1.6.3-bnuy.4") == "1.6.3.4" && UpdateCheck.number("1.6.4-bnuy") == "1.6.4.0" && UpdateCheck.number("1.6.7-bunni.2") == "1.6.7.2" && UpdateCheck.number("1.6.3") == "1.6.3")
         precondition(!UpdateCheck.isNewer("1.6.4",than:"1.6.3-discord"))
-        for (tag,current,offered) in [("v1.6.3-discord.2","1.6.3-discord",true),("v1.6.4-discord","1.6.3-discord.2",true),("v1.6.3-discord","1.6.3-discord",false),("v1.6.3-discord","1.6.3-discord.2",false),("v1.6.3-discord.3","1.6.3-discord.2",true),("v1.6.3-bnuy.4","1.6.3-discord.3",true),("v1.6.4-bnuy","1.6.3-bnuy.4",true),("v1.6.3-bnuy.4","1.6.3-bnuy.4",false)] {
+        for (tag,current,offered) in [("v1.6.3-discord.2","1.6.3-discord",true),("v1.6.4-discord","1.6.3-discord.2",true),("v1.6.3-discord","1.6.3-discord",false),("v1.6.3-discord","1.6.3-discord.2",false),("v1.6.3-discord.3","1.6.3-discord.2",true),("v1.6.3-bnuy.4","1.6.3-discord.3",true),("v1.6.4-bnuy","1.6.3-bnuy.4",true),("v1.6.3-bnuy.4","1.6.3-bnuy.4",false),("v1.6.7-bunni","1.6.3-bnuy.4",true),("v1.6.7-bunni.2","1.6.7-bunni",true),("v1.6.7-bunni","1.6.7-bunni",false)] {
             let version=String(tag.dropFirst())
-            let found=try UpdateCheck.parse(release(tag,assets:[disk(version,name:"RecallBnuy")]),current:current,system:"26.6.2")
+            let found=try UpdateCheck.parse(release(tag,assets:[disk(version,name:"Bunni")]),current:current,system:"26.6.2")
             precondition((found != nil) == offered,tag)
         }
         let found=try UpdateCheck.parse(release("v1.0.1",assets:[disk("1.0.1")]),current:"1.0.0")

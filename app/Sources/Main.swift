@@ -25,7 +25,7 @@ import Darwin
         // so AppModel.quit handles it: it closes the sheet first.
         NSAppleEventManager.shared().setEventHandler(self,andSelector:#selector(quitEvent(_:withReplyEvent:)),forEventClass:AEEventClass(kCoreEventClass),andEventID:AEEventID(kAEQuitApplication))
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:600,height:WindowFit.window.height),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.title=Brand.name;window.isReleasedWhenClosed=false
+        window.title=Brand.windowTitle;window.isReleasedWhenClosed=false
         // The hosting view sets the window's minimum from its SwiftUI content's, which a scroll
         // view puts near zero (it replaced minSize with 0 × 32), so the content states it too
         // (WindowContent): the height the screen has room for.

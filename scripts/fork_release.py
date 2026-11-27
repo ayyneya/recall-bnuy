@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build RecallBnuy, unsigned, for a release on the fork: the engine from Recall's official release of the same
+"""Build Bunni, unsigned, for a release on the fork: the engine from Recall's official release of the same
 version and the app from this checkout. The workflow signs and packages it on another machine.
 """
 import argparse
@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-NAME = 'RecallBnuy'
+NAME = 'Bunni'
 UPSTREAM = 'AsherJN/recall'
 
 
@@ -71,7 +71,7 @@ def build(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--tag', required=True, help="Recall's release, such as v1.6.3")
-    parser.add_argument('--version', required=True, help='such as 1.6.3-bnuy')
+    parser.add_argument('--version', required=True, help='such as 1.6.7-bunni')
     parser.add_argument('--runtime-archive', type=Path, help='use this engine instead of fetching it')
     parser.add_argument('--output', type=Path, default=ROOT/'runtime/build/fork')
     build(parser.parse_args())

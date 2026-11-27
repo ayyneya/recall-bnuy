@@ -1,5 +1,5 @@
-name: Release RecallBnuy
-# Follows every Recall release: merge it into discord-full, let Claude fix what the merge breaks, then publish.
+name: Release Bunni
+# Follows every Recall release: merge it into bnuy, let Claude fix what the merge breaks, then publish.
 on:
   schedule:
     - cron: '17 * * * *'
@@ -10,7 +10,7 @@ on:
         type: boolean
         default: false
       force:
-        description: Release even with no new Recall version (the next number, like 1.6.3-bnuy.4)
+        description: Release even with no new Recall version (the next number, like 1.6.7-bunni.2)
         type: boolean
         default: false
 concurrency:
@@ -63,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: discord-full
+          ref: bnuy
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -117,10 +117,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           FIX: ${{ needs.check.outputs.fix }}
         run: |
-          version=${TAG#v}-discord${FIX:+.$FIX}
+          version=${TAG#v}-bunni${FIX:+.$FIX}
           python3 scripts/fork_release.py --tag "$TAG" --version "$version" --output "$RUNNER_TEMP/out"
           git bundle create "$RUNNER_TEMP/out/merged.bundle" HEAD
-          tar -cf "$RUNNER_TEMP/build.tar" -C "$RUNNER_TEMP/out" RecallBnuy.app app.entitlements merged.bundle
+          tar -cf "$RUNNER_TEMP/build.tar" -C "$RUNNER_TEMP/out" Bunni.app app.entitlements merged.bundle
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
@@ -141,7 +141,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: discord-full
+          ref: bnuy
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/download-artifact@v4
@@ -153,8 +153,8 @@ jobs:
           mkdir "$RUNNER_TEMP/out"
           tar -xf "$RUNNER_TEMP/build.tar" -C "$RUNNER_TEMP/out"
           git fetch "$RUNNER_TEMP/out/merged.bundle" HEAD:refs/heads/merged
-          git merge-base --is-ancestor origin/discord-full merged
-          changed=$(git diff --name-only origin/discord-full merged -- .github/workflows .github/fork-release-claude.md scripts/fork_check.sh scripts/fork_release.py scripts/fork_certificate.sh)
+          git merge-base --is-ancestor origin/bnuy merged
+          changed=$(git diff --name-only origin/bnuy merged -- .github/workflows .github/fork-release-claude.md scripts/fork_check.sh scripts/fork_release.py scripts/fork_certificate.sh)
           if [ -n "$changed" ]; then echo "The merge changed: $changed"; exit 1; fi
       - name: Sign and package
         env:
@@ -162,7 +162,7 @@ jobs:
           PASSWORD: ${{ secrets.FORK_CERT_PASSWORD }}
         run: |
           out=$RUNNER_TEMP/out
-          app=$out/RecallBnuy.app
+          app=$out/Bunni.app
           [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION" ]
           keychain=$RUNNER_TEMP/fork.keychain-db
           lock=$(openssl rand -hex 16)
@@ -183,10 +183,10 @@ jobs:
           codesign --verify --deep --strict "$app"
           security delete-keychain "$keychain"
           mkdir "$RUNNER_TEMP/stage"
-          ditto "$app" "$RUNNER_TEMP/stage/RecallBnuy.app"
+          ditto "$app" "$RUNNER_TEMP/stage/Bunni.app"
           ln -s /Applications "$RUNNER_TEMP/stage/Applications"
-          image=RecallBnuy-$VERSION.dmg
-          hdiutil create -quiet -volname RecallBnuy -fs HFS+ -format UDZO -srcfolder "$RUNNER_TEMP/stage" "$out/$image"
+          image=Bunni-$VERSION.dmg
+          hdiutil create -quiet -volname Bunni -fs HFS+ -format UDZO -srcfolder "$RUNNER_TEMP/stage" "$out/$image"
           (cd "$out" && shasum -a 256 "$image" > "$image.sha256")
       - name: Publish
         if: env.PUBLISH == 'true'
@@ -194,7 +194,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           out=$RUNNER_TEMP/out
-          git push "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" merged:discord-full
+          git push "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" merged:bnuy
           gh release view "$TAG" --repo "$UPSTREAM" --json body --jq .body > "$RUNNER_TEMP/recall.md"
           last=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
           {
@@ -210,7 +210,7 @@ jobs:
           bare=lambda text:re.sub(r"(?<![\w`/.-])@(?=[A-Za-z0-9])","",text)
           recall=re.sub(r"<details>\s*<summary>\s*Verify.*?</details>\s*","",open(f"{temp}/recall.md").read(),flags=re.S|re.I)
           changes=open(f"{temp}/changes.md").read().strip()
-          open(f"{temp}/notes.md","w").write(f"""RecallBnuy: Recall {version} with bunni's changes, including the full Discord card. Unsigned: the first time, open it from System Settings › Privacy & Security › Open Anyway.
+          open(f"{temp}/notes.md","w").write(f"""Bunni: Recall {version} with bunni's changes, including the full Discord card. Unsigned: the first time, open it from System Settings › Privacy & Security › Open Anyway.
 
           ## What's new
 
@@ -226,7 +226,7 @@ jobs:
           </details>
           """)
           NOTES
-          gh release create "v$VERSION" "$out/RecallBnuy-$VERSION.dmg" "$out/RecallBnuy-$VERSION.dmg.sha256" --repo "$GITHUB_REPOSITORY" --target "$(git rev-parse merged)" --title "RecallBnuy $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --latest
+          gh release create "v$VERSION" "$out/Bunni-$VERSION.dmg" "$out/Bunni-$VERSION.dmg.sha256" --repo "$GITHUB_REPOSITORY" --target "$(git rev-parse merged)" --title "Bunni $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --latest
   report:
     needs: [check, build, publish]
     if: failure() && (github.event_name == 'schedule' || inputs.publish)

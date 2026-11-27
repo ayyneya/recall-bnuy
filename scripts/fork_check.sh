@@ -1,5 +1,5 @@
 #!/bin/bash
-# Everything discord-full must pass before a release. Run from the repository root.
+# Everything bnuy (Bunni) must pass before a release. Run from the repository root.
 set -euo pipefail
 scratch=$(mktemp -d);trap 'rm -rf "$scratch"' EXIT
 flags=(-O -target arm64-apple-macos26.5 -parse-as-library)

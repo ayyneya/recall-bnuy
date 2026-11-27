@@ -1,4 +1,4 @@
-You are merging a new Recall release into `discord-full`, the fork's full Discord build. Nobody is watching: finish on your own or stop. The merge is already in progress in this checkout, or finished with a failing check. `fork-check.log`, if it exists, holds the last check's output. `fork-upstream.diff` holds everything Recall changed in this release.
+You are merging a new Recall release into `bnuy`, Bunni's branch. Nobody is watching: finish on your own or stop. The merge is already in progress in this checkout, or finished with a failing check. `fork-check.log`, if it exists, holds the last check's output. `fork-upstream.diff` holds everything Recall changed in this release.
 
 Goal: `/usr/local/bin/fork-check` passes (run exactly that; it runs `scripts/fork_check.sh`), with Recall's new work and every Discord feature kept.
 

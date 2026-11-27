@@ -23,7 +23,7 @@ openssl req -x509 -newkey rsa:3072 -nodes -days 7300 -keyout "$folder/key" -out 
 legacy=$(openssl version | grep -q LibreSSL || echo -legacy)
 openssl pkcs12 -export $legacy -inkey "$folder/key" -in "$folder/certificate" -out "$kept" -passout "pass:$password"
 chmod 600 "$kept"
-base64 -i "$kept" | gh secret set FORK_CERT_P12 --repo ayyneya/recall
-printf %s "$password" | gh secret set FORK_CERT_PASSWORD --repo ayyneya/recall
+base64 -i "$kept" | gh secret set FORK_CERT_P12 --repo ayyneya/recall-bnuy
+printf %s "$password" | gh secret set FORK_CERT_PASSWORD --repo ayyneya/recall-bnuy
 security add-generic-password -U -a "$USER" -s RecallDiscordCertificate -w "$password"
 echo "Done. The certificate is on the fork, with a copy at $kept and its password in your login keychain (RecallDiscordCertificate)."

@@ -11,7 +11,10 @@ enum Brand {
     static let repositoryPath="AsherJN/recall"
     static let repository=URL(string:"https://github.com/\(repositoryPath)")!
     /// The fork this build is released from: updates and its pictures come from here, not Recall's own repository.
-    static let forkPath="ayyneya/recall"
+    static let forkPath="ayyneya/recall-bnuy"
+    /// The fork's own name, and the window title that shows both.
+    static let forkName="Bunni"
+    static let windowTitle="\(name) (\(forkName))"
     static let releases=URL(string:"https://github.com/\(forkPath)/releases")!
     static let issues=URL(string:"https://github.com/\(forkPath)/issues/new/choose")!
     /// GitHub's latest-release API for the repository. GitHub redirects a

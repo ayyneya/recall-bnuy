@@ -36,10 +36,10 @@ enum UpdateCheck {
         for field in fields { guard let number=Int(field),number>=0 else { return nil };numbers.append(number) }
         return numbers
     }
-    /// The fork's "1.6.3-bnuy" or "1.6.3-bnuy.4", and its earlier "-discord" ones, as numbers to compare ("1.6.3.0", "1.6.3.4"). Only the updater
+    /// The fork's "1.6.7-bunni" or "1.6.7-bunni.4", and its earlier "-bnuy" and "-discord" ones, as numbers to compare ("1.6.3.0", "1.6.3.4"). Only the updater
     /// reads it this way: to Recall's copy rules the suffix never counts as older, so neither app trashes the other.
     static func number(_ version:String) -> String {
-        guard let suffix=version.range(of:"-(discord|bnuy)",options:.regularExpression) else { return version }
+        guard let suffix=version.range(of:"-(discord|bnuy|bunni)",options:.regularExpression) else { return version }
         let fix=version[suffix.upperBound...].dropFirst()
         return version[..<suffix.lowerBound]+"."+(fix.isEmpty ? "0" : fix)
     }
