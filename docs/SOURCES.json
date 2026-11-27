@@ -34,6 +34,11 @@
      "patch": "patches/dxmt-gpu-errors.patch",
      "sha256": "384d8d252ae9bf9baa0b37f9cf9d1617665b4fdbcb9d2f0801cc138694aee207",
      "applies_after": "patches/dxmt-shader-pack.patch"
+    },
+    {
+     "patch": "patches/dxmt-stream-output.patch",
+     "sha256": "4361f2d828b5761ea22fde36d0c02af2562f7f4a19a68e143b7ab53003f518ab",
+     "applies_after": "patches/dxmt-gpu-errors.patch"
     }
    ],
    "nvapi_headers_commit": "d08488fcc82eef313b0464db37d2955709691e94",
@@ -58,11 +63,11 @@
     },
     {
      "patch": "patches/wine-win32u-display-log.patch",
-     "sha256": "2387fa06d76891b7b5981473bb06b3b939e2c7569f79b6e3a7cbf12c21297568"
+     "sha256": "80274025293382aef5d3042e11cea71e855a3768589b3ef6f57a9f9a3e026613"
     },
     {
      "patch": "patches/wine-winemac-activation.patch",
-     "sha256": "84d5a67ff6720e8758a62a15494f4b62d2d2092ab8498e059207d5f0987578ad"
+     "sha256": "6689832868fcab1194c11b0ac8cf89e335c396fe06ba5f386f99147e279621e4"
     },
     {
      "patch": "patches/wine-audio-devices.patch",
@@ -71,6 +76,10 @@
     {
      "patch": "patches/wine-service-security.patch",
      "sha256": "964f3162bc2272861e29f020fe88fded9f508587b9836ae1feebb638366a6d25"
+    },
+    {
+     "patch": "patches/wine-media-foundation.patch",
+     "sha256": "6953a54789593481cd3396803af1fbcffb9247c33c44a757b5621df826b2251c"
     }
    ],
    "v1_patches_apply_after": "patches/wine-portable-directory-boolean.patch and Soju's ncrypt-persisted-keys.patch"
@@ -178,11 +187,11 @@
   },
   {
    "path": "patches/wine-win32u-display-log.patch",
-   "sha256": "2387fa06d76891b7b5981473bb06b3b939e2c7569f79b6e3a7cbf12c21297568"
+   "sha256": "80274025293382aef5d3042e11cea71e855a3768589b3ef6f57a9f9a3e026613"
   },
   {
    "path": "patches/wine-winemac-activation.patch",
-   "sha256": "84d5a67ff6720e8758a62a15494f4b62d2d2092ab8498e059207d5f0987578ad"
+   "sha256": "6689832868fcab1194c11b0ac8cf89e335c396fe06ba5f386f99147e279621e4"
   },
   {
    "path": "patches/wine-audio-devices.patch",
@@ -191,6 +200,10 @@
   {
    "path": "patches/wine-service-security.patch",
    "sha256": "964f3162bc2272861e29f020fe88fded9f508587b9836ae1feebb638366a6d25"
+  },
+  {
+   "path": "patches/wine-media-foundation.patch",
+   "sha256": "6953a54789593481cd3396803af1fbcffb9247c33c44a757b5621df826b2251c"
   }
  ]
 }

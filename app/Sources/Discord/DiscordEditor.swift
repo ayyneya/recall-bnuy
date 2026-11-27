@@ -87,7 +87,7 @@ struct DiscordPageHeader: View {
                         DesignIcon("lucide:chevron-down",size:16).foregroundStyle(DiscordColors.ink(0.45)).rotationEffect(.degrees(studio.gallery ? 180 : 0))
                     }.frame(height:32).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).accessibilityLabel(L("My cards")).accessibilityValue(studio.gallery ? L("Open") : L("Closed"))
+                .buttonStyle(.plain).accessibilityLabel(L("My cards")).accessibilityValue(studio.gallery ? L("Opened") : L("Closed"))
                 .opacity(home ? 0 : 1).allowsHitTesting(!home).accessibilityHidden(home)
                 if home { Text(L("Discord")).designFont(24,.bold).tracking(-0.7).foregroundStyle(DiscordColors.body).opacity(named).accessibilityAddTraits(.isHeader) }
             case .profile,.history:

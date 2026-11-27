@@ -24,8 +24,8 @@ reference.
 Initialize DXMT at its exact commit and initialize the pinned DirectX and NVAPI
 headers submodules. Apply, once each and in this order, `patches/dxmt-v1-private.patch`,
 `patches/dxmt-v1-performance.patch`, `patches/dxmt-portable-metal.patch`,
-`patches/dxmt-metalfx-upscaling.patch`, `patches/dxmt-shader-pack.patch` and
-`patches/dxmt-gpu-errors.patch`.
+`patches/dxmt-metalfx-upscaling.patch`, `patches/dxmt-shader-pack.patch`,
+`patches/dxmt-gpu-errors.patch` and `patches/dxmt-stream-output.patch`.
 Extract the Wine source and apply, once each and in this order,
 `patches/wine-v1-canvas.patch`, `patches/wine-mouselook.patch`,
 `patches/wine-portable-directory-boolean.patch`, Soju's
@@ -104,11 +104,28 @@ helper; generated files remain ignored. Remaining `test_*.py` modules depend on
 installed engines, reconstructed source, historical development shortcuts, or
 private measured sessions and are excluded from this portable selection.
 
+`tests/test_eager_initial_mode.py`, included in the portable selection, checks
+that the activation patch's exclusive-mode hunk changes only the activity
+predicate. With Wine's driver source checked out at `runtime/source/wine-winemac`
+(the patch's base is that checkout's first commit), it also applies
+the patch to that source, extracts Wine's complete exclusive-mode method and
+compiles it against fake application/display boundaries. It checks that an
+inactive Diablo III startup realizes its requested physical mode before the
+call returns, along with exact process selection, later background deferral,
+capture failures and desktop restoration. It does not call real display APIs.
+
 Native fixtures under `tests/` extract or compile the relevant upstream source
 and need the pinned toolchain/runtime. For example, `tests/fullscreen/run.py
 --focus-recovery` exercises the normal presentation path at both resolutions.
 The `--overlay` control is a known failing diagnostic, not release acceptance.
 No test licenses or distributes Blizzard game files.
+
+`tests/highlights/run.py` saves MP4 highlights through Media Foundation in Wine the way Overwatch does
+(one clip as in a player's log: 27 seconds of 720p60, finished through the game's callback; one with
+Media Foundation's shared work queue held while the file is finished) and checks each file with
+AVFoundation, and with FFmpeg when it is installed; it needs an engine with `winemacmf` (by default the one
+`app/Resources/release.json` pins) and the pinned LLVM-MinGW. `tests/run_highlights.py` checks the
+app's Highlights window and the Recall mark without Wine.
 
 ## Release build pipeline
 
@@ -207,6 +224,49 @@ Runtime `phase2-20261103.1` is `phase2-20261102.1` with only the Mac driver `win
 built with `patches/wine-winemac-activation.patch` (`scripts/build_wine_native.py winemac`, then
 `scripts/derive_runtime.py --native winemac`): coming back to the game re-reads the display list
 only when the displays changed while the player was away.
+
+Runtime `phase2-20261112.1` is `phase2-20261103.1` with DXMT built with
+`patches/dxmt-stream-output.patch` on top of the other DXMT patches (`scripts/build_portable_dxmt.py`,
+then `scripts/derive_runtime.py --stream-output <DXMT workspace>`): only `d3d11.dll` and
+`winemetal.so` (which holds DXMT's shader converter) are replaced. Built with the patch, DXMT's other
+files differ only in their build timestamps, so they stay as `phase2-20261103.1` ships them.
+
+Runtime `phase2-20261112.3` is `phase2-20261112.1` with Media Foundation built with
+`patches/wine-media-foundation.patch` (`scripts/build_wine_native.py media`, then
+`scripts/derive_runtime.py --media`): `mfreadwrite.dll`, `mfh264enc.dll` and `wine.inf` are replaced,
+and `winemacmf.dll` and its Unix library `winemacmf.so` are added. `build_wine_native.py` compiles
+`winemacmf` with the commands Wine's build uses for `mfh264enc` (the DLL), `winedmo` (the Unix
+library) and the Mac driver (its Objective-C file). Wine's `configure` doesn't list `dlls/winemacmf`,
+so the full build (`scripts/build_portable_runtime.py`) doesn't apply this patch.
+
+Runtime `phase2-20261113.1` is `phase2-20261112.3` with only the Mac driver `winemac.so` replaced,
+built with `patches/wine-winemac-activation.patch` (`scripts/build_wine_native.py winemac`, then
+`scripts/derive_runtime.py --native winemac`): with `WINEMAC_APPKIT_UPDATE_CYCLE=0` (Faster key
+response) AppKit's display-synchronized event loop is off, so input reaches the driver as it
+happens instead of once per display refresh. Without the variable, the driver behaves as before.
+
+Runtime `phase2-20261116.1` is `phase2-20261113.1` with Media Foundation built again from the updated
+`patches/wine-media-foundation.patch` (`scripts/build_wine_native.py media`, then
+`scripts/derive_runtime.py --media`): `winemacmf.so`, `winemacmf.dll`, `mfreadwrite.dll` and
+`mfh264enc.dll` are replaced, and `wine.inf` is unchanged. When macOS gives Apple's software H.264
+encoder instead of the hardware one, the encoder keeps 15 frames back before it returns the first,
+and saving an MP4 used to stop waiting for it. The encoder now gets the frames it needs, uses the
+program's average bitrate when it has no quality setting, and reports an error instead of waiting
+forever if it stops returning frames. `WINEMACMF_SOFTWARE_ENCODER=1` asks for the software encoder
+(the highlights tests use it).
+
+Runtime `phase2-20261119.1` is `phase2-20261116.1` with only the Mac driver `winemac.so` replaced,
+built with the updated `patches/wine-winemac-activation.patch` (`scripts/build_wine_native.py winemac`,
+then `scripts/derive_runtime.py --native winemac`): Diablo III's first exclusive fullscreen mode is
+applied before macOS first activates the game, so the game no longer sets up its picture for the old
+desktop mode. Every other program takes the same path as before.
+
+Runtime `phase2-20261122.1` is `phase2-20261119.2` (1.6.6's engine) with only `win32u.so` replaced,
+built with the updated `patches/wine-win32u-display-log.patch` (`scripts/build_wine_native.py win32u`,
+then `scripts/derive_runtime.py --native win32u`): win32u refuses a font's instance id once the font
+is freed, so a program that keeps one (Battle.net, through Wine's DirectWrite) no longer leaves
+win32u's font lock held and freezes. `tests/font_handles/run.py` checks it against the engine, with
+`phase2-20261119.2` as the control.
 
 Runtime `phase2-20261007.2` is `phase2-20261007.1` with only the Mac driver
 replaced (`scripts/build_wine_native.py winemac`, then `scripts/derive_runtime.py

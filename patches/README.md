@@ -89,6 +89,16 @@ the process restarts and its last, half-drawn frame stays on screen.
 - Logged descriptions are cut to 600 characters: Wine's debug output takes
   lines of about 1,000 bytes.
 
+`dxmt-stream-output.patch` (1.6.4) fixes flickering particle effects (Ana's
+sleep, Sombra's hack, mythic skins, highlight intros). Overwatch builds them with
+stream output through a geometry shader that passes points through unchanged,
+and DXMT dropped every such draw. DXMT's vertex-shader emulation of stream output
+now takes such a shader (DXMT's own pass-through checks, which never matched and
+now also require each move to copy an input unchanged, kept in the shader's
+reflection), a draw whose only output is stream output gets a pass without
+attachments, and point draws append instance after instance and draw after draw,
+as D3D does.
+
 ## Wine
 
 These apply to the `sources/wine` subtree of the
@@ -136,8 +146,34 @@ Overwatch sees 96 as before. From 1.6 Recall turns Retina mode on only when the
 main display is a Retina one; without it each Windows pixel is a point and
 Battle.net keeps 96.
 
+From 1.6.7 the same patch has win32u refuse a font's instance id once the font
+is freed. Wine's DirectWrite keeps those ids for fonts a program loads from
+memory, and Wine frees a font soon after its last use. win32u took the freed
+entry of its handle table for a font, faulted with its font lock held and never
+released the lock, so Battle.net froze when a player clicked Install on a game
+(#80, #81). `tests/font_handles/run.py` shows both behaviours against real
+engines.
+
 `wine-winemac-activation.patch` applies to the Mac driver after the two driver
 patches above:
+- Diablo III's first exclusive display-mode request is applied before returning,
+  even if macOS has not activated the new game process yet. Queuing it until
+  the first click let the game initialize fullscreen geometry using the old
+  desktop mode, then shrink or crop its 4K picture on activation. This applies
+  only to the exact executable basename `Diablo III64.exe` (case-insensitive);
+  after its first activation, background requests defer as before. The existing
+  capture, failure and desktop-mode restoration paths are used;
+- `WINEMAC_APPKIT_UPDATE_CYCLE=0` turns AppKit's display-synchronized event
+  loop off (contributed by @Seglats; Recall's Faster key response, an
+  experimental switch in Settings › Advanced, off by default). Programs built
+  with the macOS 26 SDK or later get the loop by default, and it hands key
+  presses, clicks, scrolls and pointer motion to the program once per display
+  refresh. With it off they arrive as they happen: in Overwatch on a 144 Hz
+  display a key press reached the driver after a median of 5.5 ms instead of
+  8.5 ms in play. Pointer motion then arrives once per mouse report too, so a
+  mouse reporting 4,000 times a second kept the driver's main thread busy for
+  half of every second in the game's menus. Aim and clicks from raw input never
+  waited for the loop;
 - macOS announces the game as active again on every left click; the driver
   re-reads the display list only after the game had actually been inactive, so
   clicks no longer cost a frame;
@@ -252,6 +288,35 @@ program started, so headphones connected later never reached the game. Now:
 Battle.net's update agent checks its helper service on every start. With an empty descriptor or a
 forward-slash path it found the helper broken and reinstalled itself (about 14 MB) on the next start,
 so every other start downloaded it again.
+
+`wine-media-foundation.patch` (1.6.4) lets Overwatch save highlights as MP4. The game writes them
+with Media Foundation's sink writer (`mfreadwrite`), which could neither encode nor finish a file.
+Wine has no AAC encoder, and its H.264 encoder and MPEG-4 file sink hand the work to GStreamer, which
+this build doesn't include. The patch:
+- adds `winemacmf`: an H.264 encoder (VideoToolbox), an AAC encoder (AudioToolbox) and an MPEG-4
+  file sink that writes the file itself and puts its index first. They are
+  registered under the class IDs Wine's `mfh264enc` and `mfmp4srcsnk` forward to, and under Windows'
+  AAC encoder ID; `wine.inf` registers `winemacmf.dll`;
+- lets the sink writer put encoders and format converters between the game's frames and the file,
+  encode, drain at the end of a segment and finish the file (`Finalize`, with or without an
+  asynchronous callback);
+- passes the game's encoder settings (bit rate and rate control, quality, profile, keyframe interval,
+  B-frames) through `ICodecAPI`, and reads RGB frames bottom-up when their type gives no stride, as
+  Windows does;
+- lists RGB and I420 among the H.264 encoder's registered inputs;
+- gives Apple's software H.264 encoder, which macOS uses when the hardware one is unavailable, the
+  frames it keeps back before it returns the first (15), gives it the game's average bit rate since it
+  has no quality setting, and ends a save with an error instead of waiting forever if an encoder stops
+  returning frames;
+- (1.6.6) finishes the file without waiting on anything else. Until 1.6.6 the sink used AVFoundation's
+  writer, which interleaved its tracks on queues of its own and could hold one back for good, and
+  finished on Media Foundation's standard work queue, whose single thread also carries the program's
+  callbacks: on some Macs a save stopped after its last frame and left a 0 MB file after the game had
+  said it was saved. The sink now keeps each sample in a temporary file as it arrives and writes the
+  index at the end, on a thread of its own; a sample or a track it cannot take is left out instead of
+  failing the file. Its AAC track marks each frame as needing the one before it, so Apple's players
+  and others trim the encoder's priming alike and the sound starts with the picture in both.
+Saving as WebM, which the game encodes itself, is unchanged.
 
 Apply each patch once, in this order, first using `git apply --check`.
 Do not combine them with historical candidate patch variants.

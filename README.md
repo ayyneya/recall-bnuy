@@ -103,11 +103,11 @@ Mac gaming has had a rough reputation for a long time, and for years it was dese
 
 I built Recall to make playing it on a Mac easier while we wait. My hope is that Blizzard eventually brings Overwatch to the Mac natively, and that projects like this help show the interest is there. In the meantime, I hope you enjoy :)
 
-Josh
-
 If you'd like to support my work, you can try Mosaic News, my free news app designed to be the most transparent, customizable, and privacy focused way to follow the news.
 
 You can also support me by helping fuel my caffeine addiction and/or starring this repository which helps other Mac players find Recall.
+
+- Josh
 
 <p>
   <a href="https://mosaicnews.app/?utm_source=recall&amp;utm_medium=github&amp;utm_campaign=readme"><img src="app/Resources/ButtonMosaic.png" height="44" alt="Try Mosaic News"></a>
@@ -154,7 +154,7 @@ Yes. Set it as your main display in macOS System Settings, then choose its resol
 <details>
 <summary><b>Can I install the game on an external drive?</b></summary>
 
-Yes. Choose an external SSD during setup and keep it connected while you play. The [installation guide](docs/INSTALLATION.md) covers supported formats and setup.
+Yes. Choose an external SSD during setup, or move an existing setup there later with **Settings › General › Move…**; nothing downloads again. Keep the drive connected while you play. The [installation guide](docs/INSTALLATION.md) covers supported formats and setup.
 </details>
 
 <details>
