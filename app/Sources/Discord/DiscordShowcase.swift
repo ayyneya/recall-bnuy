@@ -511,7 +511,7 @@ struct DiscordWindowFit: ViewModifier {
     private static let launched=Date()
     func body(content:Content)->some View {
         content.onGeometryChange(for:CGFloat.self,of:{ $0.size.height }) { height in
-            guard Date().timeIntervalSince(Self.launched) < 5,let window=NSApp.windows.first(where:{ $0.title == Brand.name && $0.isVisible }),
+            guard Date().timeIntervalSince(Self.launched) < 5,let window=NSApp.windows.first(where:{ $0.title == Brand.windowTitle && $0.isVisible }),
                   let screen=window.screen ?? NSScreen.main,let shown=window.contentView?.bounds.height,height > shown+1 else { return }
             let frame=window.frame,grown=min(frame.height+height-shown,screen.visibleFrame.height)
             guard grown > frame.height+1 else { return }
