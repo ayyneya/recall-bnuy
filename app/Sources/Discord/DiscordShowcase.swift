@@ -502,35 +502,7 @@ private extension AnyTransition {
 
 // MARK: the invite's counts
 
-/// The server's member and online counts, from Discord's public invite record at most once a day (nothing about the
-/// player is sent).
-@MainActor @Observable final class InviteCounts {
-    static let shared=InviteCounts()
-    private(set) var online:Int?
-    private(set) var members:Int?
-    @ObservationIgnored private var answered:Date?
-    @ObservationIgnored private var asked=false
-    private static let key="discordInviteCounts"
-    init() {
-        let kept=UserDefaults.standard.dictionary(forKey:Self.key)
-        online=kept?["online"] as? Int;members=kept?["members"] as? Int;answered=kept?["at"] as? Date
-    }
-    /// Asks once a launch, when the last answer is a day old.
-    func refresh() {
-        guard !asked,answered.map({ Date().timeIntervalSince($0) > 24*3600 }) ?? true,
-              let url=URL(string:"https://discord.com/api/v10/invites/\(Brand.discord.lastPathComponent)?with_counts=true") else { return }
-        asked=true
-        URLSession.cookieless.dataTask(with:URLRequest(url:url,cachePolicy:.reloadIgnoringLocalCacheData,timeoutInterval:15)) { data,_,_ in
-            let record=data.flatMap { try? JSONSerialization.jsonObject(with:$0) } as? [String:Any]
-            let online=record?["approximate_presence_count"] as? Int,members=record?["approximate_member_count"] as? Int
-            Task { @MainActor in
-                guard let online,let members else { return }
-                self.online=online;self.members=members;self.answered=Date()
-                UserDefaults.standard.set(["online":online,"members":members,"at":Date()],forKey:Self.key)
-            }
-        }.resume()
-    }
-}
+// InviteCounts is Recall's own (ProjectLinks.swift, since 1.6.7); the panel reads the same shared counts.
 
 /// The home screen's content, as it first fills in, grows Recall's window to fit it (the Discord panel is taller
 /// than the link it replaced), never past the screen and never shrinking it. Only in the first seconds after launch,

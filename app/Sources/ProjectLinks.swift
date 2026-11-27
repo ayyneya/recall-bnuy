@@ -137,7 +137,7 @@ struct DiscordLink:View {
     }
 }
 // Discord's public invite record, at most once a day; the last answer is kept for the next launch.
-@MainActor @Observable private final class InviteCounts {
+@MainActor @Observable final class InviteCounts {
     static let shared=InviteCounts()
     private(set) var online:Int?
     private(set) var members:Int?
