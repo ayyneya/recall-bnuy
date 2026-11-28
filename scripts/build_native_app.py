@@ -33,6 +33,10 @@ LOCALIZATIONS=ROOT/'app/Resources/Localizations'
 INFO_STRINGS={'NSMicrophoneUsageDescription':MICROPHONE_USAGE,'NSHumanReadableCopyright':COPYRIGHT}
 # LogsReadme.md: Save Logs' guide for engineers and AI assistants (LogBundle.swift).
 RESOURCES=('MosaicLogo.png','LinkedInMark.png','AuthorPhoto.jpg','Wordmark.png','WordmarkDark.png','LogsReadme.md')
+# Recall's helper and the app's files it is built with (HelperProtocol.swift has the label).
+HELPER_LABEL='org.overwatch2mac.launcher.helper'
+HELPER_EXECUTABLE='recall-helper'
+HELPER_SHARED=('HelperProtocol.swift','SMC.swift')
 def run(*args):subprocess.run([str(a) for a in args],check=True)
 def localize(resources):
     """English (the strings in the code), then each translation as <language>.lproj with
@@ -92,6 +96,13 @@ def build(output,workspace,runtime_archive,icon=None,identity=None,preview=False
     shutil.move(helpers/'ow2-setup.build.json',output.parent/'worker-build.json')
     run('/usr/bin/swiftc','-file-prefix-map',str(ROOT)+'=/ow2-source','-O','-target','arm64-apple-macos'+MINIMUM_MACOS,'-parse-as-library',*sorted((ROOT/'app/Sources').glob('*.swift')),'-o',macos/APP_NAME)
     run('/usr/bin/swiftc','-file-prefix-map',str(ROOT)+'=/ow2-source','-O','-target','arm64-apple-macos'+MINIMUM_MACOS,ROOT/'scripts/portable_pipeline.swift','-o',helpers/'ow2-pipeline')
+    # Recall's helper (app/Helper/main.swift): the LaunchDaemon behind Steady Wi-Fi and fan speed,
+    # registered with SMAppService only once the player turns one on (GameHelper.swift).
+    run('/usr/bin/swiftc','-file-prefix-map',str(ROOT)+'=/ow2-source','-O','-target','arm64-apple-macos'+MINIMUM_MACOS,
+        ROOT/'app/Helper/main.swift',*(ROOT/'app/Sources'/name for name in HELPER_SHARED),'-o',helpers/HELPER_EXECUTABLE)
+    daemons=output/'Contents/Library/LaunchDaemons';daemons.mkdir(parents=True)
+    (daemons/(HELPER_LABEL+'.plist')).write_bytes(plistlib.dumps({'Label':HELPER_LABEL,'BundleProgram':'Contents/Helpers/'+HELPER_EXECUTABLE,
+        'MachServices':{HELPER_LABEL:True},'AssociatedBundleIdentifiers':['org.overwatch2mac.launcher']}))
     run('/usr/bin/clang','-ffile-prefix-map='+str(ROOT)+'=/ow2-source','-arch','x86_64','-mmacosx-version-min='+MINIMUM_MACOS,'-x','objective-c','-fblocks','-fno-objc-arc','-DDXMT_PIPELINE_CACHE_OFFLINE_TOOL','-O2','-dynamiclib',native/'pipeline_recipe.c',native/'pipeline_cache.c','-framework','Foundation','-framework','Metal','-framework','QuartzCore','-install_name','@rpath/libpipeline_prepare.dylib','-o',helpers/'libpipeline_prepare.dylib')
     run('/usr/bin/clang','-ffile-prefix-map='+str(ROOT)+'=/ow2-source','-arch','x86_64','-mmacosx-version-min='+MINIMUM_MACOS,'-x','objective-c','-fblocks','-fobjc-arc','-DDXMT_PIPELINE_CACHE_OFFLINE_TOOL','-O2','-I',native,ROOT/'scripts/pipeline_prepare.m','-x','none',helpers/'libpipeline_prepare.dylib','-Wl,-rpath,@executable_path','-framework','Foundation','-framework','Metal','-o',helpers/'pipeline-prepare')
     # Warms the game app's own shader cache from the learned pipelines (portable_pipeline.swift).
@@ -118,6 +129,9 @@ def build(output,workspace,runtime_archive,icon=None,identity=None,preview=False
     shutil.copy2(ROOT/'licenses/PROJECT-NOTICE',resources/'NOTICE.txt')
     shutil.copy2(ROOT/'licenses/GITHUB-MARK-NOTICE.txt',resources/'GITHUB-MARK-NOTICE.txt')
     shutil.copy2(ROOT/'licenses/PROJECT-LINKS-NOTICE.txt',resources/'PROJECT-LINKS-NOTICE.txt')
+    # The helper follows AWDL Control and Stats (MIT): their notices ship with it.
+    (resources/'Licenses').mkdir(exist_ok=True)
+    for name in ('AWDLCONTROL-MIT','STATS-MIT'):shutil.copy2(ROOT/'licenses'/name,resources/'Licenses'/name)
     for name in RESOURCES:
         shutil.copy2(ROOT/'app/Resources'/name,resources/name)
     languages=localize(resources)
@@ -127,11 +141,13 @@ def build(output,workspace,runtime_archive,icon=None,identity=None,preview=False
         run('/usr/bin/swift',ROOT/'scripts/app_icon.swift',ROOT/'app/Resources/AppIcon.png',iconset)
         run('/usr/bin/iconutil','-c','icns',iconset,'-o',resources/'AppIcon.icns')
     (output/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':'org.overwatch2mac.launcher','CFBundleExecutable':APP_NAME,'CFBundleName':APP_NAME,'CFBundleDisplayName':APP_NAME,'CFBundlePackageType':'APPL','CFBundleShortVersionString':release['appVersion'],'CFBundleVersion':APP_BUILD,'CFBundleIconFile':'AppIcon','LSMinimumSystemVersion':MINIMUM_MACOS,'NSHighResolutionCapable':True,'LSMultipleInstancesProhibited':True,'NSPrincipalClass':'NSApplication','NSMicrophoneUsageDescription':MICROPHONE_USAGE,'NSHumanReadableCopyright':COPYRIGHT,'CFBundleDevelopmentRegion':'en','CFBundleLocalizations':languages}))
-    for binary in (helpers/'libpipeline_prepare.dylib',helpers/'pipeline-prepare',helpers/'pipeline-warm'):
+    for binary in (helpers/'libpipeline_prepare.dylib',helpers/'pipeline-prepare',helpers/'pipeline-warm',helpers/HELPER_EXECUTABLE):
         run('/usr/bin/strip','-S','-x',binary)
     if identity:
         for binary in (helpers/'ow2-setup',helpers/'ow2-pipeline',helpers/'libpipeline_prepare.dylib',helpers/'pipeline-prepare',helpers/'pipeline-warm',rosetta.parent):
             run('/usr/bin/codesign','--force','--options','runtime','--timestamp','--sign',identity,binary)
+        # Its own identifier, which Recall checks before talking to it (HelperProtocol.swift).
+        run('/usr/bin/codesign','--force','--options','runtime','--timestamp','--identifier',HELPER_LABEL,'--sign',identity,helpers/HELPER_EXECUTABLE)
         with tempfile.TemporaryDirectory() as folder:
             entitlements=Path(folder)/'app.entitlements';entitlements.write_bytes(plistlib.dumps(ENTITLEMENTS))
             run('/usr/bin/codesign','--force','--options','runtime','--timestamp','--entitlements',entitlements,'--sign',identity,output)

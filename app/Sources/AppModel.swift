@@ -441,7 +441,10 @@ final class AppModel {
     private var launchDeferredForUpdate=false
     /// The version offerUpdate already showed this launch.
     private var offeredUpdate: String?
-    var screen: Screen = .welcome
+    var screen: Screen = .welcome { didSet { followGame() } }
+    /// Steady Wi-Fi and fan speed (Settings › Graphics), done by Recall's helper while Overwatch is open.
+    let gameHelper=GameHelper()
+    private func followGame() { gameHelper.sessionGame = screen == .running && existingName == "Overwatch" }
     var sheet: Sheet?
     var busy=false { didSet { if oldValue && !busy { offerUpdate() } } }
     var stage=""
@@ -471,7 +474,7 @@ final class AppModel {
     let service: SetupService
     var state=[String:Any]()
     var canCancel=false
-    var existingName="Battle.net"
+    var existingName="Battle.net" { didSet { followGame() } }
     /// Moving out of the disk image: older copies this replaces, and a copy
     /// already in Applications that is at least as new as this one.
     var moveReplaces=[String]()
@@ -628,6 +631,8 @@ final class AppModel {
         if release?.distribution == "private-preview",let i=CommandLine.arguments.firstIndex(of:"--preview-state"),CommandLine.arguments.indices.contains(i+1),let preview=Screen(rawValue:CommandLine.arguments[i+1]) {
             isPreview=true;previewScreen(preview);return
         }
+        // With Game Mode off, Overwatch is one more Wine app: the session says whether it's the game.
+        gameHelper.begin { [weak self] in self?.syncSession() }
         // Plugging the drive back in retries without another click.
         mountObserver=NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didMountNotification,object:nil,queue:.main) { [weak self] _ in
             Task { @MainActor in if self?.screen == .driveMissing { self?.recheck() } }

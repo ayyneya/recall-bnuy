@@ -43,6 +43,8 @@ struct SettingsSheet:View {
     @State private var customDraft:String?
     /// Shader memory's slider: how many of the shader cache's parts Overwatch loads.
     @State private var shaderParts=1.0
+    /// Fan speed's slider while it's dragged; the helper gets the value when it's let go.
+    @State private var fanPercent:Double?
     /// Follows System Settings: the main display can change while Settings is open.
     @State private var main=MainDisplay.current
     /// Also follows System Settings, where the player turns the microphone on or off.
@@ -133,6 +135,8 @@ struct SettingsSheet:View {
             upscaling
             metalHUD
             gameModeSetting
+            steadyWiFiSetting
+            fanSetting
             shaderMemory
             clearShaderCache
         case .audio:
@@ -497,6 +501,73 @@ struct SettingsSheet:View {
                               isOn:$model.gameMode,disabled:model.running != nil)
                 if let running=model.running { closeFirst(running,several:false) }
             }
+        }
+    }
+    /// Steady Wi-Fi (GameHelper): AirDrop and the other Apple wireless links paused while
+    /// Overwatch is open on Wi-Fi. It can change at any time, game open or not.
+    private var steadyWiFiSetting:some View {
+        let helper=model.gameHelper
+        return LauncherPanel(inset:16) {
+            VStack(alignment:.leading,spacing:6) {
+                SettingSwitch(title:L("Steady Wi-Fi"),
+                              detail:L("While Overwatch is open on Wi-Fi, pauses AirDrop, Handoff, Sidecar and other Apple wireless features so your Mac stays on your router’s channel. Fewer lag spikes. They come back when Overwatch quits."),
+                              isOn:Bindable(helper).steadyWiFi)
+                if helper.steadyWiFi {
+                    helperStatus(helper.approval != .ready || helper.notAnswering ? nil
+                                 : !helper.onWiFi ? L("Not needed now: your Mac isn’t on Wi-Fi.")
+                                 : helper.wiFiHeld ? L("On now. AirDrop and Handoff come back when Overwatch quits.")
+                                 : L("Starts when Overwatch opens on Wi-Fi."))
+                }
+            }
+        }
+    }
+    /// Fan speed (GameHelper): every fan at the chosen share of its range while Overwatch is
+    /// open. Grayed out on a Mac without fans.
+    private var fanSetting:some View {
+        let helper=model.gameHelper
+        let percent=Int((fanPercent ?? helper.fanPercent).rounded())
+        return LauncherPanel(inset:16) {
+            VStack(alignment:.leading,spacing:10) {
+                SettingSwitch(title:L("Fan speed while playing"),
+                              detail:helper.hasFans ? L("Your Mac’s fans run at this speed while Overwatch is open, and go back to automatic when it quits or your Mac gets too warm.")
+                                                    : L("This Mac has no fans."),
+                              isOn:Bindable(helper).fansWhilePlaying,disabled:!helper.hasFans)
+                if helper.hasFans {
+                    HStack(spacing:10) {
+                        Slider(value:Binding(get:{ fanPercent ?? helper.fanPercent },set:{ fanPercent=$0 }),in:0...100,step:5) {
+                            Text(L("Fan speed"))
+                        } onEditingChanged: { editing in
+                            if !editing,let fanPercent { model.gameHelper.fanPercent=fanPercent;self.fanPercent=nil }
+                        }.labelsHidden().tint(LauncherStyle.accent).accessibilityValue(L("{0}%",String(percent)))
+                        Text(L("{0}%",String(percent))).font(LauncherStyle.font(13,.medium)).monospacedDigit().frame(minWidth:40,alignment:.trailing)
+                    }.disabled(!helper.fansWhilePlaying)
+                    if helper.fansWhilePlaying {
+                        helperStatus(helper.approval != .ready || helper.notAnswering ? nil
+                                     : helper.fansSet ? L("On now: fans at {0}%.",String(Int(helper.fanPercent.rounded()))) : nil)
+                    }
+                }
+            }
+        }.opacity(helper.hasFans ? 1 : 0.6)
+    }
+    /// The helper's state under a setting that uses it: allowing it in System Settings, a copy of
+    /// Recall that can't add it, or it not answering; otherwise `text`, the setting's own state.
+    @ViewBuilder private func helperStatus(_ text:String?) -> some View {
+        let helper=model.gameHelper
+        if helper.approval == .needsApproval {
+            HStack(spacing:12) {
+                Text(L("Allow {0} in System Settings › General › Login Items & Extensions to finish turning this on.",Brand.name))
+                    .font(LauncherStyle.font(12,.medium)).fixedSize(horizontal:false,vertical:true)
+                Spacer(minLength:8)
+                Button(L("Open System Settings"),action:helper.openLoginItems).buttonStyle(.bordered).buttonBorderShape(.capsule)
+            }
+        } else if helper.approval == .unavailable {
+            Text(L("This copy of {0} can’t add its helper. This setting works in the signed release.",Brand.name))
+                .font(LauncherStyle.font(12,.medium)).fixedSize(horizontal:false,vertical:true)
+        } else if helper.notAnswering {
+            Text(L("{0}’s helper isn’t answering. Turn this off and on again.",Brand.name))
+                .font(LauncherStyle.font(12,.medium)).fixedSize(horizontal:false,vertical:true)
+        } else if let text {
+            Text(text).font(LauncherStyle.font(12)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
         }
     }
     /// How much of the shader cache Overwatch loads when it starts (ShaderMemory): its parts
