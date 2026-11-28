@@ -105,7 +105,7 @@ struct DiscordLink:View {
     @Environment(\.openURL) private var openURL
     private let counts=InviteCounts.shared
     var body:some View {
-        Button { openURL(Brand.discord) } label: {
+        Button { Bunni.openDiscordInvite() } label: {
             HStack(spacing:14) {
                 DiscordMark().fill(.white).frame(width:30,height:23).accessibilityHidden(true)
                 VStack(alignment:.leading,spacing:3) {
@@ -137,7 +137,7 @@ struct DiscordLink:View {
     }
 }
 // Discord's public invite record, at most once a day; the last answer is kept for the next launch.
-@MainActor @Observable private final class InviteCounts {
+@MainActor @Observable final class InviteCounts {
     static let shared=InviteCounts()
     private(set) var online:Int?
     private(set) var members:Int?
@@ -166,7 +166,7 @@ struct DiscordLink:View {
 /// Help's footer, beside Report a Problem: questions go to the community, bugs to GitHub.
 struct DiscordHelpLink:View {
     var body:some View {
-        Link(destination:Brand.discord) {
+        Button { Bunni.openDiscordInvite() } label: {
             Label {
                 Text(L("Ask on Discord")).font(LauncherStyle.font(13,.medium))
             } icon: {
@@ -252,7 +252,8 @@ struct Wordmark:View {
     var height:CGFloat
     var badge:String?
     @Environment(\.colorScheme) private var scheme
-    var body:some View {
+    var body:some View { BunniLockup(badge:badge) }
+    private var recall:some View {
         Image(nsImage:scheme == .dark ? ProjectArtwork.wordmarkDark : ProjectArtwork.wordmark)
             .resizable().interpolation(.high).scaledToFit().frame(height:height)
             .overlay(alignment:.leading) {
@@ -280,14 +281,16 @@ struct AuthorPhoto:View {
 }
 struct MosaicButton:View {
     let placement:Brand.Placement
+    /// Smaller, for Bunni's compact Josh card.
+    var compact=false
     var body:some View {
         Link(destination:Brand.mosaic(placement)) {
             HStack(spacing:8) {
-                Text(L("Get")).font(LauncherStyle.font(13,.semibold))
+                Text(L("Get")).font(LauncherStyle.font(compact ? 12 : 13,.semibold))
                 Image(nsImage:ProjectArtwork.mosaic).renderingMode(.original).resizable().scaledToFit()
-                    .frame(width:100,height:19).accessibilityHidden(true)
-                Image(systemName:"arrow.up.right").font(.system(size:9,weight:.semibold)).accessibilityHidden(true)
-            }.foregroundStyle(.white).padding(.horizontal,16).frame(height:38)
+                    .frame(width:compact ? 64 : 100,height:compact ? 13 : 19).accessibilityHidden(true)
+                if !compact { Image(systemName:"arrow.up.right").font(.system(size:9,weight:.semibold)).accessibilityHidden(true) }
+            }.foregroundStyle(.white).padding(.horizontal,compact ? 10 : 16).frame(height:compact ? 30 : 38)
                 .background(.black,in:Capsule())
                 .overlay { Capsule().strokeBorder(.white.opacity(0.18),lineWidth:1) }
                 .contentShape(Capsule())
@@ -296,15 +299,17 @@ struct MosaicButton:View {
     }
 }
 struct CoffeeButton:View {
+    /// Smaller, for Bunni's compact Josh card.
+    var compact=false
     @Environment(\.colorScheme) private var scheme
     var body:some View {
         Link(destination:Brand.koFi) {
             HStack(spacing:7) {
-                Image(systemName:"cup.and.saucer.fill").font(.system(size:13,weight:.semibold)).foregroundStyle(LauncherStyle.accent)
+                Image(systemName:"cup.and.saucer.fill").font(.system(size:compact ? 12 : 13,weight:.semibold)).foregroundStyle(LauncherStyle.accent)
                     .accessibilityHidden(true)
-                Text(L("Buy me a coffee")).font(LauncherStyle.font(13,.semibold))
-                Image(systemName:"arrow.up.right").font(.system(size:9,weight:.semibold)).accessibilityHidden(true)
-            }.foregroundStyle(.primary).padding(.horizontal,16).frame(height:38)
+                Text(L("Buy me a coffee")).font(LauncherStyle.font(compact ? 12 : 13,.semibold))
+                if !compact { Image(systemName:"arrow.up.right").font(.system(size:9,weight:.semibold)).accessibilityHidden(true) }
+            }.foregroundStyle(.primary).padding(.horizontal,compact ? 10 : 16).frame(height:compact ? 30 : 38)
                 .background(LauncherStyle.surface(scheme),in:Capsule())
                 .overlay { Capsule().strokeBorder(.primary.opacity(0.14),lineWidth:1) }
                 .contentShape(Capsule())

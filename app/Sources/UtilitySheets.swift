@@ -79,6 +79,8 @@ struct SettingsSheet:View {
         }.font(LauncherStyle.font(14)).padding(.horizontal,32).padding(.vertical,28)
             .frame(width:LauncherStyle.sheetWidth,height:LauncherStyle.largeSheetHeight)
             .tint(.primary).background { LauncherBackground() }
+            // Settings › Discord, opened from General's Discord card or the home screen (DiscordSettings.swift).
+            .discordPages(model.discord.studio,tab:model.settingsTab,uninstall:{ model.sheet = .uninstall },uninstalling:model.uninstall == .working)
             .onReceive(NotificationCenter.default.publisher(for:NSApplication.didChangeScreenParametersNotification)) { _ in
                 main=MainDisplay.current
                 model.refreshDisplay()
@@ -127,7 +129,7 @@ struct SettingsSheet:View {
             battleNet
             mouse
             highlightMark
-            if model.showsDiscord { discord }
+            if model.showsDiscord { DiscordSettingsCard(studio:model.discord.studio) }
             if !model.canChangeLocation || model.otherInstallation != nil { installLocation }
         case .display:
             display
@@ -186,12 +188,6 @@ struct SettingsSheet:View {
             SettingSwitch(title:L("{0} mark on highlights",Brand.name),
                           detail:L("Adds “{0}” to the MP4 highlights you save. Highlights already marked keep it.",HighlightMark.text),
                           isOn:Binding(get:{ model.highlightMark },set:{ model.highlightMark=$0;model.highlightMarkAsked=true }))
-        }
-    }
-    private var discord:some View {
-        LauncherPanel(inset:16) {
-            SettingSwitch(title:L("Discord activity"),detail:L("Discord shows you’re playing Overwatch on Mac with {0}, and for how long.",Brand.name),
-                          isOn:Bindable(model.discord).on)
         }
     }
     private var battleNet:some View {
@@ -805,10 +801,10 @@ private struct MouseTile:View {
                     Text(title).font(LauncherStyle.font(12,selected ? .semibold : .medium)).foregroundStyle(selected ? .primary : .secondary)
                     if waiting || recommended {
                         Text(waiting ? L("Waiting for permission") : L("Recommended")).font(LauncherStyle.font(10,.semibold))
-                            .foregroundStyle(LauncherStyle.accentText(scheme)).minimumScaleFactor(0.85)
+                            .foregroundStyle(LauncherStyle.accentText(scheme)).minimumScaleFactor(0.7)
                     }
                 }
-            }.lineLimit(1).frame(maxWidth:.infinity,minHeight:50)
+            }.lineLimit(1).padding(.horizontal,6).frame(maxWidth:.infinity,minHeight:50)
                 .background {
                     if selected {
                         shape.fill(scheme == .dark ? Color.white.opacity(0.1) : .white).shadow(color:.black.opacity(0.12),radius:1.5,y:1)
@@ -1113,19 +1109,21 @@ struct AboutSheet:View {
             HStack(alignment:.center,spacing:18) {
                 AppArtwork(size:76)
                 VStack(alignment:.leading,spacing:4) {
-                    Text(Brand.name).font(LauncherStyle.font(30,.bold)).tracking(-0.8).accessibilityAddTraits(.isHeader)
+                    BunniNameLine()
                     Text(Brand.tagline).font(LauncherStyle.font(14)).foregroundStyle(.secondary)
                     Text(version).font(LauncherStyle.font(11)).foregroundStyle(.secondary)
+                    BunniCredit()
                 }
             }
             HStack(spacing:12) {
-                RepositoryLink(compact:true)
+                BunniRepositoryLinks()
                 VStack(alignment:.leading,spacing:3) {
                     Text(L("Open source. Contributions welcome.")).foregroundStyle(.secondary)
                     Button(L("Licenses")) { licenses=true }.buttonStyle(.plain).underline()
                         .foregroundStyle(.secondary).help(L("Show {0}’s license and notices",Brand.name))
                 }.font(LauncherStyle.font(12))
             }
+            BunniDifferences()
             // The heading, the repository row and the bottom row stay put; the letter and the
             // support section scroll, as Help's content does.
             ScrollView {
@@ -1268,7 +1266,11 @@ struct UpdateSheet:View {
         FittedSheet {
             switch model.update {
             case .available(let item):
-                SheetHero(symbol:"arrow.down.circle",title:L("Update available"),subtitle:L("{0} {1} is ready to install. You have {2}.",Brand.name,item.version,UpdateCheck.installed))
+                SheetHero(symbol:"arrow.down.circle",title:L("Update available"),subtitle:L("{0} {1} is ready to install. You have {2}.",Brand.forkName,item.version,UpdateCheck.installed))
+                BunniUpdateSource().padding(.top,-16)
+                if !item.notes.isEmpty {
+                    BunniNotesPanel(raised:true,title:L("What’s new"),items:item.notes.map { ("",$0,$0) },bullets:true)
+                } else {
                 LauncherPanel {
                     VStack(alignment:.leading,spacing:10) {
                         Text(L("What’s new")).font(LauncherStyle.font(14,.semibold))
@@ -1282,6 +1284,7 @@ struct UpdateSheet:View {
                             }.font(LauncherStyle.font(13))
                         }
                     }
+                }
                 }
                 if !model.updateNotice.isEmpty { LauncherNotice(text:model.updateNotice,symbol:"exclamationmark.triangle") }
                 Text(L("Your game, settings and Battle.net sign-in are kept. The app reopens when it’s done."))
@@ -1424,25 +1427,9 @@ struct WhatsNewSheet:View {
     @Environment(\.dismiss) private var dismiss
     var body:some View {
         VStack(spacing:24) {
-            SheetHero(symbol:"sparkles",title:L("What’s new in {0}",WhatsNew.version),subtitle:"\(Brand.name) \(UpdateCheck.installed)")
-            // A long list scrolls inside the panel, so the sheet fits the smallest window.
-            LauncherPanel {
-                ScrollView {
-                    VStack(alignment:.leading,spacing:16) {
-                        ForEach(WhatsNew.items.indices,id:\.self) { index in
-                            let item=WhatsNew.items[index]
-                            HStack(alignment:.top,spacing:14) {
-                                Image(systemName:item.symbol).font(.system(size:17,weight:.medium)).foregroundStyle(LauncherStyle.accent)
-                                    .frame(width:24).accessibilityHidden(true)
-                                VStack(alignment:.leading,spacing:3) {
-                                    Text(item.title).font(LauncherStyle.font(14,.semibold))
-                                    Text(item.detail).font(LauncherStyle.font(13)).lineSpacing(2).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
-                                }
-                            }
-                        }
-                    }.frame(maxWidth:.infinity,alignment:.leading)
-                }.scrollBounceBehavior(.basedOnSize).frame(maxHeight:.infinity)
-            }.frame(maxHeight:.infinity)
+            SheetHero(symbol:"sparkles",title:L("What’s new in {0}",UpdateCheck.installed),subtitle:"\(Brand.name) \(UpdateCheck.installed)")
+            // Bunni's notes over Recall's, scrolling, so the sheet fits the smallest window.
+            BunniWhatsNew()
             HStack(spacing:16) {
                 Link(L("Release Notes"),destination:Brand.releases).font(LauncherStyle.font(13))
                 Spacer()

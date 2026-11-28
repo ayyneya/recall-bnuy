@@ -4,7 +4,7 @@ import AppKit
 // Shared visual vocabulary. The system font (SF Pro) needs no bundled font or
 // download and matches the menus, sheets and alerts macOS draws.
 enum LauncherStyle {
-    static let accent=Color(red:1,green:0.62,blue:0.10)
+    static let accent=Bunni.accent
     static let ink=Color(red:0.15,green:0.13,blue:0.10)
     static let contentWidth:CGFloat=440
     static let radius:CGFloat=22
@@ -17,26 +17,28 @@ enum LauncherStyle {
         .system(size:size,weight:weight)
     }
     static func ground(_ scheme:ColorScheme) -> Color {
-        scheme == .dark ? Color(red:0.09,green:0.095,blue:0.105) : Color(red:0.975,green:0.970,blue:0.958)
+        Bunni.ground(scheme)
     }
     static func surface(_ scheme:ColorScheme) -> Color {
-        scheme == .dark ? Color(red:0.14,green:0.145,blue:0.16) : .white
+        Bunni.surface(scheme)
     }
     /// The accent as small text. It is too light to read on white, so light mode uses a darker
     /// orange (#A35700, 5.4:1 on white).
     static func accentText(_ scheme:ColorScheme) -> Color {
-        scheme == .dark ? accent : Color(red:0.64,green:0.34,blue:0)
+        Bunni.pink(scheme)
     }
 }
 struct LauncherBackground: View {
+    /// The home screen's glow sits lower, behind Play and the Discord panel (Bunni).
+    var home=false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body:some View {
         LauncherStyle.ground(scheme)
             .overlay(alignment:.top) {
                 if !reduceTransparency {
-                    RadialGradient(colors:[LauncherStyle.accent.opacity(scheme == .dark ? 0.10 : 0.13),.clear],center:.center,startRadius:10,endRadius:240)
-                        .frame(width:520,height:420).offset(y:-90)
+                    RadialGradient(colors:[Bunni.glow(scheme),.clear],center:.center,startRadius:10,endRadius:240)
+                        .frame(width:520,height:420).offset(x:home ? -22 : 0,y:home ? 149 : -90)
                 }
             }
             .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)

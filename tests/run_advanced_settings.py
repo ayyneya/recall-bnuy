@@ -25,7 +25,7 @@ if __name__ == '__main__':
             'CFBundleExecutable': executable.name,
             'CFBundlePackageType': 'APPL',
         }))
-        sources = [str(path) for path in sorted((ROOT/'app/Sources').glob('*.swift'))
+        sources = [str(path) for path in sorted((ROOT/'app/Sources').rglob('*.swift'))
                    if path.name != 'Main.swift']
         subprocess.run(['/usr/bin/swiftc', '-Onone', '-j', '4',
                         '-target', 'arm64-apple-macos' + MINIMUM_MACOS,

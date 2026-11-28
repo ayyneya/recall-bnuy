@@ -17,7 +17,8 @@ import Darwin
         try? FileManager.default.createDirectory(at:lockDirectory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         lockFD=open(lockDirectory.appendingPathComponent("app.lock").path,O_CREAT|O_RDWR|O_NOFOLLOW,0o600)
         if lockFD<0 || flock(lockFD,LOCK_EX|LOCK_NB) != 0 {
-            for app in NSRunningApplication.runningApplications(withBundleIdentifier:Bundle.main.bundleIdentifier ?? "") where app.processIdentifier != ProcessInfo.processInfo.processIdentifier { app.activate(options:[]) }
+            // Bunni: Recall or Bunni, whichever holds the shared game, comes to the front.
+            for app in Bunni.identifiers.flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:)) where app.processIdentifier != ProcessInfo.processInfo.processIdentifier { app.activate(options:[]) }
             NSApp.terminate(nil);return
         }
         // Quits from outside the app (the Dock, logging out, System Settings' "Quit & Reopen"
@@ -25,7 +26,7 @@ import Darwin
         // so AppModel.quit handles it: it closes the sheet first.
         NSAppleEventManager.shared().setEventHandler(self,andSelector:#selector(quitEvent(_:withReplyEvent:)),forEventClass:AEEventClass(kCoreEventClass),andEventID:AEEventID(kAEQuitApplication))
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:600,height:WindowFit.window.height),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.title=Brand.name;window.isReleasedWhenClosed=false
+        window.title=Brand.windowTitle;window.isReleasedWhenClosed=false;window.backgroundColor=Bunni.titleBar
         // The hosting view sets the window's minimum from its SwiftUI content's, which a scroll
         // view puts near zero (it replaced minSize with 0 × 32), so the content states it too
         // (WindowContent): the height the screen has room for.
@@ -198,6 +199,7 @@ import Darwin
 }
 @main struct LauncherMain {
     @MainActor static func main() {
+        Bunni.adoptRecallSettings()
         let app=NSApplication.shared,delegate=AppDelegate()
         app.setActivationPolicy(.regular);app.delegate=delegate
         withExtendedLifetime(delegate) { app.run() }
@@ -208,7 +210,7 @@ import Darwin
 private struct WindowContent:View {
     let model:AppModel
     var body:some View {
-        SetupView(model:model).frame(minWidth:WindowFit.window.width,minHeight:WindowFit.shared.windowHeight)
+        SetupView(model:model).frame(minWidth:WindowFit.window.width,minHeight:WindowFit.shared.windowHeight).bunniInk()
     }
 }
 /// The responder chain's undo: and redo:, which AppKit declares for Objective-C only.

@@ -16,11 +16,14 @@ struct SetupView: View {
                             }
                         } else {
                             Wordmark(height:84,badge:model.screen == .failure ? (model.failure.code == "cancelled" ? "pause.fill" : "exclamationmark") : (model.screen == .driveMissing ? "externaldrive" : nil))
-                            LauncherHeading(title:model.title,subtitle:subtitle)
+                            if model.screen == .running { BunniRunningHeading(title:model.title) }
+                            else { LauncherHeading(title:model.title,subtitle:subtitle) }
                         }
                         details
                         if model.offersOtherInstallation { OtherInstallationNote(model:model) }
                         VStack(spacing:12) { actions }
+                        // Bunni: every notice in one row under the buttons, never a stack that moves them.
+                        if [.launching,.running,.ready].contains(model.screen) { BunniNotices(notices:bunniNotices) }
                         if !model.notice.isEmpty {
                             if let topic=model.noticeTopic {
                                 LauncherNotice(text:model.notice,action:(L("Open Help"),{ model.openHelp(.troubleshooting,topic:topic) }))
@@ -30,17 +33,10 @@ struct SetupView: View {
                         if model.screen == .launching && model.graphics.phase != nil { GraphicsDetails(progress:model.graphics) }
                     }.frame(maxWidth:LauncherStyle.contentWidth).padding(.top,model.screen == .welcome ? 28 : 34)
                     Spacer(minLength:28)
-                    Group {
-                        if model.showsDiscord {
-                            VStack(spacing:8) {
-                                DiscordLink()
-                                if model.offersDiscordActivity { DiscordActivityOffer(discord:model.discord).transition(.opacity) }
-                            }
-                        } else { GitHubHelpLink() }
-                    }
+                    Group { if model.showsDiscord { DiscordHomePanel(studio:model.discord.studio,openSettings:model.screen == .moveApp ? nil : { model.settingsTab = .general;model.sheet = .settings }) } else { GitHubHelpLink() } }
                         .frame(maxWidth:LauncherStyle.contentWidth).padding(.bottom,supportPlacement == nil ? 20 : 14)
                     if let placement=supportPlacement {
-                        SupportCard(placement:placement).frame(maxWidth:LauncherStyle.contentWidth).padding(.bottom,20)
+                        BunniSupportCard(placement:placement) { model.sheet = .about }.frame(maxWidth:LauncherStyle.contentWidth).padding(.bottom,20)
                     }
                     VersionStatus(model:model).padding(.bottom,12)
                     HStack(spacing:12) {
@@ -50,9 +46,10 @@ struct SetupView: View {
                         FooterTile(title:L("About"),symbol:"info.circle") { model.sheet = .about }
                     }.frame(maxWidth:LauncherStyle.contentWidth).padding(.bottom,24)
                 }.padding(.horizontal,36).frame(maxWidth:.infinity).frame(minHeight:geometry.size.height)
+                .modifier(DiscordWindowFit())
             }.scrollIndicators(.hidden)
         }
-        .background { LauncherBackground() }
+        .background { LauncherBackground(home:true) }
         .font(LauncherStyle.font(14)).tint(.primary)
         .animation(reduceMotion ? nil : .easeInOut(duration:0.20),value:model.screen)
         .sheet(item:$model.sheet) { sheet in
@@ -174,10 +171,6 @@ struct SetupView: View {
                         Text(L("Taking longer than usual. Check the Dock for a Battle.net window."))
                             .font(LauncherStyle.font(13)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }
-                    if LoggingReminder.shows(model) { LoggingReminder(model:model) }
-                    PerformanceTip(model:model)
-                    if model.showKoreanTip { KoreanAccountTip(open:model.openRegionSettings) { model.koreanTipDismissed=true } }
-                    firstMatchTip
                 }
             }
         case .readyToInstall:
@@ -200,34 +193,51 @@ struct SetupView: View {
                 Text(verbatim:(model.folderToFix.path as NSString).abbreviatingWithTildeInPath)
                     .font(LauncherStyle.font(13)).foregroundStyle(.secondary).multilineTextAlignment(.center).textSelection(.enabled)
             }
-        case .ready:
-            VStack(spacing:16) {
-                if LoggingReminder.shows(model) { LoggingReminder(model:model) }
-                if model.lowStorage { storageWarning }
-                if model.showsAfterMatch { AfterMatchStatus(progress:model.afterMatchProgress,updating:model.updatingShaderCache,optimizingFor:model.macOSShadersNeeded ? model.macOS : nil,rebuilding:model.rebuildingShaders) }
-                else if model.macOSShadersNeeded { MacOSShadersCard(version:model.macOS,shaders:model.learnedShaders ?? 0,optimize:model.optimizeShaders).disabled(model.busy) }
-                PerformanceTip(model:model)
-                if model.showKoreanTip { KoreanAccountTip(open:model.openRegionSettings) { model.koreanTipDismissed=true } }
-                if !model.gameInstalled { SignInNote(model:model) }
-                if let stage=model.highPrecisionInvite {
-                    HighPrecisionCard(stage:stage,access:model.inputMonitoring,open:{
-                        if stage == .invite { model.sheet = .highPrecision } else { model.requestInputMonitoring() }
-                    },close:model.closeHighPrecisionInvite)
-                }
-                firstMatchTip
-            }
-        case .running:
-            VStack(spacing:16) {
-                if model.existingName == "Overwatch" && model.gameWindowHidden { GameClosingNote() }
-                if LoggingReminder.shows(model) { LoggingReminder(model:model) }
-                if model.showsAfterMatch { AfterMatchStatus(progress:model.afterMatchProgress,updating:model.updatingShaderCache,optimizingFor:model.macOSShadersNeeded ? model.macOS : nil,rebuilding:model.rebuildingShaders) }
-                PerformanceTip(model:model)
-                if model.showKoreanTip { KoreanAccountTip(open:model.openRegionSettings) { model.koreanTipDismissed=true } }
-                if !model.gameInstalled { SignInNote(model:model) }
-                firstMatchTip
-            }
+        case .ready: EmptyView()  // Bunni: its cards are in the notice row (bunniNotices)
+        case .running: EmptyView()  // Bunni: the closing note is a line under the buttons, the rest the notice row
         case .driveMissing: EmptyView()
         }
+    }
+    /// Bunni: the cards these screens used to stack, in the order they stacked, for the one notice row.
+    private var bunniNotices:[BunniNotice] {
+        let screen=model.screen
+        var list:[BunniNotice]=[]
+        if LoggingReminder.shows(model) { list.append(BunniNotice("logging",icons:[.symbol("doc.text.magnifyingglass")]) { LoggingReminder(model:model) }) }
+        if screen == .ready && model.lowStorage { list.append(BunniNotice("storage",icons:[.symbol("externaldrive")]) { storageWarning }) }
+        if screen != .launching {
+            if model.showsAfterMatch {
+                let doing=model.macOSShadersNeeded ? L("Optimizing shaders for macOS {0}",model.macOS) : model.rebuildingShaders ? L("Rebuilding your shaders")
+                    : model.updatingShaderCache ? L("Updating your shader cache") : L("Preparing shaders from your last match")
+                list.append(BunniNotice("afterMatch",icons:[.symbol("gearshape.2")],busy:doing) {
+                    AfterMatchStatus(progress:model.afterMatchProgress,updating:model.updatingShaderCache,optimizingFor:model.macOSShadersNeeded ? model.macOS : nil,rebuilding:model.rebuildingShaders)
+                })
+            } else if screen != .running && model.macOSShadersNeeded {
+                list.append(BunniNotice("macOSShaders",icons:[.symbol("bolt")]) {
+                    MacOSShadersCard(version:model.macOS,shaders:model.learnedShaders ?? 0,optimize:model.optimizeShaders).disabled(model.busy)
+                })
+            }
+        }
+        let load=model.macLoad
+        if load.found {
+            var icons:[BunniNotice.Icon]=load.apps.prefix(3).map { .app(NSWorkspace.shared.icon(forFile:$0.path)) }
+            if load.lowPowerMode { icons.append(.symbol("battery.25percent")) }
+            if load.hot { icons.append(.symbol("thermometer.high")) }
+            if load.restart { icons.append(.symbol("memorychip")) }
+            list.append(BunniNotice("load",icons:icons,weight:max(1,icons.count)) { PerformanceTip(model:model) })
+        }
+        if model.showKoreanTip { list.append(BunniNotice("korean",icons:[.symbol("person.crop.circle.badge.questionmark")]) { KoreanAccountTip(open:model.openRegionSettings) { model.koreanTipDismissed=true } }) }
+        if screen != .launching && !model.gameInstalled { list.append(BunniNotice("signIn",icons:[.symbol("person.crop.circle")]) { SignInNote(model:model) }) }
+        if screen == .ready, let stage=model.highPrecisionInvite {
+            list.append(BunniNotice("highPrecision",icons:[.symbol("cursorarrow.motionlines")]) {
+                HighPrecisionCard(stage:stage,access:model.inputMonitoring,open:{
+                    if stage == .invite { model.sheet = .highPrecision } else { model.requestInputMonitoring() }
+                },close:model.closeHighPrecisionInvite)
+            })
+        }
+        if FirstMatchTip.shows(learned:model.learnedShaders,hidden:model.stutterTipHidden) {
+            list.append(BunniNotice("stutter",icons:[.symbol("sparkles")]) { firstMatchTip })
+        }
+        return list
     }
     private var firstMatchTip:some View {
         FirstMatchTip(workshop:model.offersWorkshopCode,learned:model.learnedShaders,hidden:model.stutterTipHidden,
@@ -380,8 +390,15 @@ struct SetupView: View {
             if model.existingName == "Battle.net" {
                 BattleNetAction(title:L("Show Battle.net"),executable:model.battleNetExecutable,action:model.launch).keyboardShortcut(.defaultAction).disabled(model.busy)
             } else {
-                LauncherPrimaryAction(title:L("Show {0}",L(model.existingName)),action:model.launch).keyboardShortcut(.defaultAction).disabled(model.busy)
+                HStack(spacing:10) {
+                    LauncherPrimaryAction(title:L("Show {0}",L(model.existingName)),action:model.launch).keyboardShortcut(.defaultAction).disabled(model.busy)
+                    if model.existingName == "Overwatch" {
+                        Button(L("Force Quit…")) { NSApp.sendAction(#selector(AppDelegate.forceQuit),to:nil,from:nil) }
+                            .buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.large)
+                    }
+                }
             }
+            BunniRunningHint(game:model.existingName == "Overwatch",windowGone:model.gameWindowHidden)
         case .ready:
             if AppModel.playEnabled && model.gameInstalled {
                 LauncherPrimaryAction(title:L("Play Overwatch"),action:model.play).keyboardShortcut(.defaultAction).disabled(model.busy)
@@ -457,7 +474,8 @@ struct VersionStatus: View {
     @Bindable var model:AppModel
     var body:some View {
         HStack(spacing:6) {
-            Text(L("Version {0}",UpdateCheck.installed))
+            Button { model.sheet = .whatsNew } label: { Text(L("Version {0}",UpdateCheck.installed)).underline(color:BunniFaint.under) }
+                .buttonStyle(.borderless).help(L("What’s New"))
             switch model.update {
             case .available(let item):
                 Text("·")
@@ -472,7 +490,7 @@ struct VersionStatus: View {
             default: EmptyView()
             }
             Text("·")
-            Button(L("What’s New")) { model.sheet = .whatsNew }.buttonStyle(.borderless)
+            BunniDifferentLink { model.sheet = .about }
         }.font(LauncherStyle.font(12)).foregroundStyle(.secondary)
     }
 }
@@ -635,7 +653,7 @@ struct FirstMatchTip: View {
                             }.accessibilityLabel(copied ? L("Copied") : L("Copy Workshop code {0}",Self.workshopCode))
                             Button(L("How to Start It"),action:steps)
                         }.buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
-                        Text(L("Shader warm-up by u/Working_Dealer_5102")).font(LauncherStyle.font(12)).foregroundStyle(.tertiary) }
+                        Text(L("Shader warm-up by u/Working_Dealer_5102")).font(LauncherStyle.font(12)).foregroundStyle(BunniFaint()) }
                     }
                 }
             } icon: { Image(systemName:stage == .smooth ? "checkmark.circle" : "sparkles") }
@@ -830,7 +848,7 @@ struct FooterTile: View {
     var body:some View {
         Button(action:action) {
             VStack(spacing:6) {
-                Image(systemName:symbol).font(.system(size:18,weight:.medium)).accessibilityHidden(true)
+                Image(systemName:symbol).font(.system(size:18,weight:.medium)).foregroundStyle(BunniPink()).accessibilityHidden(true)
                 Text(title).font(LauncherStyle.font(12,.semibold))
             }.frame(maxWidth:.infinity,minHeight:58)
         }.buttonStyle(FooterTileStyle())
