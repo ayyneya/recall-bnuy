@@ -189,8 +189,8 @@ final class Service:NSObject,RecallHelperProtocol,NSXPCListenerDelegate {
         connection.invalidationHandler={ [weak self] in
             queue.async {
                 guard let self else { return }
-                connections-=1
-                guard connections <= 0 else { return }
+                self.connections-=1
+                guard self.connections <= 0 else { return }
                 letGoOfEverything()
                 exit(0)
             }
