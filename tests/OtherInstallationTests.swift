@@ -7,7 +7,7 @@ import AppKit
 // with the worker beside it where the app looks for it:
 //   mkdir -p runtime/phase-3/other-installation-tests/Contents/Helpers
 //   python3 scripts/build_portable_setup.py --output runtime/phase-3/other-installation-tests/Contents/Helpers/ow2-setup
-//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(ls app/Sources/*.swift | grep -v Main.swift) \
+//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(find app/Sources -name "*.swift" ! -name Main.swift) \
 //     tests/OtherInstallationTests.swift -o runtime/phase-3/other-installation-tests/other-installation-tests
 //   runtime/phase-3/other-installation-tests/other-installation-tests
 // Main.swift's AppDelegate, for the one menu action the app's views name.

@@ -6,7 +6,7 @@ import AppKit
 // process named ow2-setup, so the test is built under that name. Build with every app source but
 // Main.swift, and run:
 //   mkdir -p runtime/phase-3/report-tests
-//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(ls app/Sources/*.swift | grep -v Main.swift) \
+//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(find app/Sources -name "*.swift" ! -name Main.swift) \
 //     tests/SupportReportTests.swift -o runtime/phase-3/report-tests/ow2-setup
 //   runtime/phase-3/report-tests/ow2-setup
 // Main.swift's AppDelegate, for the one menu action the app's views name.
@@ -103,10 +103,17 @@ final class AppDelegate: NSObject { @objc func forceQuit() {} }
             // Faster key response (Settings › Advanced, PR #73): experimental, off by default.
             precondition(fields["faster_keys"] as? String == "off","\(fields)")
             precondition(["allowed","denied","undecided"].contains(fields["input_monitoring"] as? String ?? ""),"\(fields)")
-            // Discord (DiscordFeature.swift, schema 7): off until the player turns it on, no Discord talked to here, and never what the card shows.
+            // Discord (DiscordPresence.swift, schema 7): Live unless the player chose otherwise, and no Discord talked to here.
             let discord=fields["discord_presence"] as? [String:Any]
-            precondition(discord?["v"] as? Int == 1 && discord?["power"] as? String == "off" && discord?["allowed"] is Bool && discord?["app_id"] as? String == "default"
-                         && discord?["connected"] as? Bool == false && discord?["accepted"] as? Bool == false && discord?["last_answer"] as? String == "none","\(String(describing:discord))")
+            precondition(discord?["level"] as? String == "live" && discord?["connected"] as? Bool == false && discord?["accepted"] as? Bool == false && discord?["allowed"] is Bool,"\(String(describing:discord))")
+            // Why a card might not show: Discord's last answer, the log, the listing and server in use (never the tag).
+            precondition(discord?["v"] as? Int == 1 && discord?["last_answer"] as? String == "none" && (discord?["log"] as? [String:Any])?["state"] as? String == "not_running")
+            precondition(discord?["app_id"] as? String == "default" && discord?["server"] is String && discord?["discord_app"] is String)
+            // Schema 7: the card's switch on, Default in use and none of the player's own (their names are never in it).
+            precondition(discord?["power"] as? String == "on" && discord?["card"] as? String == "default" && discord?["own_cards"] as? Int == 0,"\(String(describing:discord))")
+            // The career profile (Full): no BattleTag here, and OverFast never asked; the tag itself is never in the report.
+            let profile=discord?["career_profile"] as? [String:Any]
+            precondition(profile?["battletag_set"] as? Bool == false && profile?["last_code"] as? String == "none","\(String(describing:profile))")
             // Other apps (REC-5): nothing launched from this copy, and its busy note never looked.
             let other=fields["other_apps"] as? [String:Any]
             precondition(other?["at_last_launch"] as? String == "none" && other?["now"] as? String == "not_checked","\(String(describing:other))")

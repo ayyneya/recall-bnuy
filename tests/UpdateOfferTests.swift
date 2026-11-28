@@ -4,7 +4,7 @@ import AppKit
 // when nothing is running (AppModel.offerUpdate). The automatic check reads a local feed: a
 // private-preview release takes --update-feed. Build with every app source but Main.swift:
 //   mkdir -p runtime/phase-3/update-offer-tests
-//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(ls app/Sources/*.swift | grep -v Main.swift) \
+//   swiftc -O -target arm64-apple-macos26.5 -parse-as-library $(find app/Sources -name "*.swift" ! -name Main.swift) \
 //     tests/UpdateOfferTests.swift -o runtime/phase-3/update-offer-tests/update-offer-tests
 //   runtime/phase-3/update-offer-tests/update-offer-tests
 // Main.swift's AppDelegate, for the one menu action the app's views name.

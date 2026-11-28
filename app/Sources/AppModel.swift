@@ -21,6 +21,7 @@ final class AppModel {
     var autoOpenBattleNet=UserDefaults.standard.object(forKey:"autoOpenBattleNet") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoOpenBattleNet,forKey:"autoOpenBattleNet") }
     }
+    /// The Discord card and Settings › Discord (DiscordFeature.swift).
     let discord=DiscordFeature()
     /// Apple's Metal Performance HUD over Overwatch (worker: launch --metal-hud). Battle.net
     /// starts the game with its own environment, so Settings changes it only while
@@ -228,8 +229,6 @@ final class AppModel {
     /// Discord is blocked in mainland China: players on China's Battle.net get GitHub wherever
     /// Recall offers the Discord (GitHubHelpLink; owner, October 15).
     var showsDiscord:Bool { currentRegion != .china }
-    // Play offers Discord activity once, under the Discord card, while the Discord app is on this Mac.
-    var offersDiscordActivity:Bool { showsDiscord && screen == .ready && !discord.on && !discord.offerAnswered && discord.discordInstalled }
     /// The 929PJ warm-up is a global-server code; China's servers don't take it (NetEase). Players
     /// on China's Battle.net get the stutter heads-up without it (owner, October 19).
     var offersWorkshopCode:Bool { currentRegion != .china }
@@ -276,7 +275,9 @@ final class AppModel {
     /// Apps the player chose Quit for, until they end.
     var quittingApps:Set<pid_t>=[]
     @ObservationIgnored private var loadChecked:Date?
-    var watchesLoad:Bool { !isPreview && clientInstalled && windowVisible && [.ready,.launching,.running].contains(screen) }
+    var watchesLoad:Bool { !isPreview && clientInstalled && windowVisible && [.ready,.launching,.running].contains(screen)
+        // Bunni: with Overwatch running, only while Bunni is in front.
+        && (BunniFront.shared.active || !(screen == .running && existingName == "Overwatch")) }
     /// Recall itself and everything under its data folders (Wine, Battle.net, Overwatch).
     private var ownPaths:[String] { [Bundle.main.bundlePath,root.standardizedFileURL.path,InstallLocation.standard.standardizedFileURL.path].map { $0.hasSuffix("/") ? $0 : $0+"/" } }
     func watchLoad() async {
@@ -293,7 +294,7 @@ final class AppModel {
                 let next=BusyApps.sample();return (BusyApps.load(from:first,to:next,excluding:paths,gameRunning:gameRunning),next)
             }.value
             previous=next;interval=5
-            macLoad=load;loadChecked=Date()
+            macLoad=Bunni.keepingApps(load,from:macLoad,gameRunning:gameRunning);loadChecked=Date();BunniMemory.shared.update()
             quittingApps.formIntersection(load.apps.map(\.pid))
         }
     }
@@ -654,6 +655,7 @@ final class AppModel {
             if clientInstalled || state["battlenet_region"] != nil { battleNetRegion=installedRegion }
             if let language=(state["battlenet_language"] as? String).flatMap(BattleNetLanguage.init) { battleNetLanguage=language }
         }
+        // The region is known now: the Discord card follows it from here.
         discord.statusKnown()
         freeBytes=(status["free_bytes"] as? NSNumber)?.uint64Value ?? 0
         // Match Finder's "available" figure, which includes purgeable storage.
@@ -690,7 +692,7 @@ final class AppModel {
     }
     func startup() {
         guard !started else { return };started=true
-        discord.start(allowed:{ [unowned self] in showsDiscord && !isPreview },lookForGame:{ [unowned self] in syncSession() })
+        discord.start(allowed:{ [unowned self] in showsDiscord && !isPreview },root:{ [unowned self] in root },lookForGame:{ [unowned self] in syncSession() })
         // Preview states exercise UI only and never create a user environment.
         if release?.distribution == "private-preview",let i=CommandLine.arguments.firstIndex(of:"--preview-state"),CommandLine.arguments.indices.contains(i+1),let preview=Screen(rawValue:CommandLine.arguments[i+1]) {
             isPreview=true;previewScreen(preview);return
@@ -1689,6 +1691,7 @@ final class AppModel {
             let lockDirectory=fm.urls(for:.cachesDirectory,in:.userDomainMask)[0].appendingPathComponent("org.overwatch2mac.launcher")
             try? fm.removeItem(at:lockDirectory)
             if let id=Bundle.main.bundleIdentifier { UserDefaults.standard.removePersistentDomain(forName:id) }
+            discord.uninstalled()
             // Move to Trash, never delete; if macOS refuses, the user drags it.
             let appRemoved=(try? fm.trashItem(at:Bundle.main.bundleURL,resultingItemURL:nil)) != nil
             clientInstalled=false;gameInstalled=false;state=[:];screen = .welcome

@@ -231,7 +231,7 @@ struct RendererSettingsSheet:View {
             .background(.background.opacity(0.6),in:RoundedRectangle(cornerRadius:8,style:.continuous))
             .overlay(alignment:.topLeading) {
                 if text.isEmpty {
-                    Text(L("name = value")).font(.system(size:12,design:.monospaced)).foregroundStyle(.tertiary)
+                    Text(L("name = value")).font(.system(size:12,design:.monospaced)).foregroundStyle(BunniFaint())
                         .padding(.horizontal,11).padding(.vertical,6).allowsHitTesting(false).accessibilityHidden(true)
                 }
             }

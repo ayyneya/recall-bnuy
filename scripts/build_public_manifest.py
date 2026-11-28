@@ -57,7 +57,7 @@ DOCS = {
     '.gitattributes': '.gitattributes',
 }
 EXECUTABLE_TARGETS = {'.githooks/pre-commit', '.githooks/pre-push'}
-BINARY_SUFFIXES = {'.png', '.icns', '.jpg', '.jpeg'}
+BINARY_SUFFIXES = {'.png', '.icns', '.jpg', '.jpeg', '.gif', '.woff2'}
 # The README draft links to staging paths; the public tree uses release paths.
 README_REPLACEMENTS = [
     ('../app/Resources/AppIcon.png', 'app/Resources/AppIcon.png'),
