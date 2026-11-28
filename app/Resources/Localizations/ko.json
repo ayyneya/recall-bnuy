@@ -889,7 +889,7 @@
     "Fan speed": "팬 속도",
     "{0}%": "{0}%",
     "On now: fans at {0}%.": "지금 켜져 있습니다. 팬 {0}%.",
-    "Allow {0} in System Settings › General › Login Items & Extensions to finish turning this on.": "이 설정을 완료하려면 시스템 설정 › 일반 › 로그인 항목 및 확장 프로그램에서 {0}을 허용하세요.",
+    "To finish, turn on {0} under Allow in the Background in System Settings › General › Login Items & Extensions. It runs only while Overwatch is open, never at login.": "마무리하려면 시스템 설정 › 일반 › 로그인 항목 및 확장 프로그램의 ‘백그라운드에서 허용’에서 {0}을 켜세요. Overwatch가 열려 있는 동안에만 실행되며, 로그인할 때는 실행되지 않습니다.",
     "This copy of {0} can’t add its helper. This setting works in the signed release.": "이 {0} 사본은 도우미를 추가할 수 없습니다. 이 설정은 서명된 릴리스에서 작동합니다.",
     "{0}’s helper isn’t answering. Turn this off and on again.": "{0} 도우미가 응답하지 않습니다. 이 설정을 껐다가 다시 켜세요."
   },

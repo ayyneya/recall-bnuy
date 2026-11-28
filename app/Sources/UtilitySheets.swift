@@ -555,7 +555,7 @@ struct SettingsSheet:View {
         let helper=model.gameHelper
         if helper.approval == .needsApproval {
             HStack(spacing:12) {
-                Text(L("Allow {0} in System Settings › General › Login Items & Extensions to finish turning this on.",Brand.name))
+                Text(L("To finish, turn on {0} under Allow in the Background in System Settings › General › Login Items & Extensions. It runs only while Overwatch is open, never at login.",Brand.name))
                     .font(LauncherStyle.font(12,.medium)).fixedSize(horizontal:false,vertical:true)
                 Spacer(minLength:8)
                 Button(L("Open System Settings"),action:helper.openLoginItems).buttonStyle(.bordered).buttonBorderShape(.capsule)

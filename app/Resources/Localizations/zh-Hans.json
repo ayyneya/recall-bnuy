@@ -889,7 +889,7 @@
     "Fan speed": "风扇转速",
     "{0}%": "{0}%",
     "On now: fans at {0}%.": "已开启：风扇转速 {0}%。",
-    "Allow {0} in System Settings › General › Login Items & Extensions to finish turning this on.": "请在“系统设置 › 通用 › 登录项与扩展”中允许{0}，以完成开启。",
+    "To finish, turn on {0} under Allow in the Background in System Settings › General › Login Items & Extensions. It runs only while Overwatch is open, never at login.": "如需完成，请在“系统设置 › 通用 › 登录项与扩展”的“允许在后台”中打开{0}。它只在 Overwatch 打开时运行，登录时不会运行。",
     "This copy of {0} can’t add its helper. This setting works in the signed release.": "此{0}副本无法添加其辅助程序。此设置在已签名的正式版本中可用。",
     "{0}’s helper isn’t answering. Turn this off and on again.": "{0}的辅助程序没有响应。请关闭此设置后再重新开启。"
   },
